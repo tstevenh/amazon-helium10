@@ -1,8 +1,11 @@
 interface ErrorStateProps {
-  error: string
+  // Named `message` because every call site passes `message=`. The prop was
+  // previously `error`, so the actual error text was silently dropped and
+  // users only ever saw the generic "Something went wrong" heading.
+  message: string
   onRetry?: () => void
 }
-export function ErrorState({ error, onRetry }: ErrorStateProps) {
+export function ErrorState({ message, onRetry }: ErrorStateProps) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
       <div className="rounded-full bg-red-100 p-3">
@@ -13,7 +16,7 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
       </div>
       <div>
         <p className="text-sm font-medium text-gray-900">Something went wrong</p>
-        <p className="text-sm text-red-600 mt-1">{error}</p>
+        <p className="text-sm text-red-600 mt-1">{message}</p>
       </div>
       {onRetry && (
         <button onClick={onRetry} className="btn-secondary mt-1">

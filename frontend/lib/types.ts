@@ -120,6 +120,13 @@ export interface SyncJob {
   completed_at: string | null
   error: string | null
   result: Record<string, unknown> | null
+  // Added when job state moved from an in-memory dict to the sync_jobs table.
+  // `running` is retained with its original meaning so existing polling works.
+  job_id: string | null
+  // queued | running | success | failed | partial
+  // 'partial' means the sync ran but Amazon returned an incomplete view.
+  status: string | null
+  records_synced: number
 }
 
 export interface SyncStatus {
