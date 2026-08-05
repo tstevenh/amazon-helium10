@@ -128,6 +128,26 @@ class AmazonApiError(Exception):
         return self.args[0]
 
 
+class PartialFetchError(Exception):
+    """Raised when one or more sub-fetches failed but others may have succeeded.
+
+    Carries the rows that WERE retrieved so callers can persist them, plus a
+    human-readable description of each failure so the API can surface it.
+
+    Callers MUST NOT run soft-delete logic when this is raised: the item list
+    is an incomplete view of Amazon's inventory, and deleting "missing" rows
+    would destroy live data.
+    """
+
+    def __init__(self, message: str, items: list[dict[str, Any]], failures: list[str]) -> None:
+        super().__init__(message)
+        self.items = items
+        self.failures = failures
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+
 # ---------------------------------------------------------------------------
 # Error-parsing helper
 # ---------------------------------------------------------------------------
@@ -721,8 +741,9 @@ def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
     SP v3: POST /sp/campaigns/list  (Content-Type: application/vnd.spCampaign.v3+json)
     SB v4: POST /sb/v4/campaigns/list  (Content-Type: application/vnd.sbCampaignResource.v4+json)
 
-    Both endpoints support nextToken pagination. Failures on either type are
-    logged as warnings and that type is skipped (returns partial list).
+    Raises PartialFetchError if any sub-fetch failed. The exception carries
+    whatever was successfully fetched, so callers can persist partial data
+    while still knowing the view is incomplete.
     """
     if settings.amazon_mock_mode:
         data = _MOCK_CAMPAIGNS.get(profile_id, [])
@@ -730,6 +751,7 @@ def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
         return data
 
     campaigns: list[dict[str, Any]] = []
+    failures: list[str] = []
 
     # --- Sponsored Products v3 ---
     try:
@@ -743,11 +765,11 @@ def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
             headers, body, "campaigns",
         )
         campaigns.extend(_normalize_sp_campaign_v3(c) for c in raw)
-        logger.warning("[amazon_ads] SP campaigns v3 profile=%s: %d campaigns", profile_id, len(raw))
-    except AmazonApiError as exc:
-        logger.warning("[amazon_ads] SP campaigns v3 fetch failed for profile %s: %s", profile_id, exc)
+        logger.info("[amazon_ads] SP campaigns v3 profile=%s: %d campaigns", profile_id, len(raw))
     except Exception as exc:
-        logger.warning("[amazon_ads] SP campaigns v3 fetch failed for profile %s: %s", profile_id, exc)
+        msg = f"SP campaigns fetch failed for profile {profile_id}: {exc}"
+        logger.error("[amazon_ads] %s", msg)
+        failures.append(msg)
 
     # --- Sponsored Brands v4 ---
     try:
@@ -761,12 +783,18 @@ def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
             headers, body, "campaigns",
         )
         campaigns.extend(_normalize_sb_campaign_v4(c) for c in raw)
-        logger.warning("[amazon_ads] SB campaigns v4 profile=%s: %d campaigns", profile_id, len(raw))
-    except AmazonApiError as exc:
-        logger.warning("[amazon_ads] SB campaigns v4 fetch failed for profile %s: %s", profile_id, exc)
+        logger.info("[amazon_ads] SB campaigns v4 profile=%s: %d campaigns", profile_id, len(raw))
     except Exception as exc:
-        logger.warning("[amazon_ads] SB campaigns v4 fetch failed for profile %s: %s", profile_id, exc)
+        msg = f"SB campaigns fetch failed for profile {profile_id}: {exc}"
+        logger.error("[amazon_ads] %s", msg)
+        failures.append(msg)
 
+    if failures:
+        raise PartialFetchError(
+            f"Campaign fetch incomplete for profile {profile_id}: " + "; ".join(failures),
+            campaigns,
+            failures,
+        )
     return campaigns
 
 
