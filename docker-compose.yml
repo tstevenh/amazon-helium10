@@ -20,6 +20,9 @@ services:
       context: ./backend
     volumes:
       - ./backend/app:/app/app
+      # Mounted so test edits are picked up without rebuilding the image.
+      - ./backend/tests:/app/tests
+      - ./backend/pytest.ini:/app/pytest.ini
     env_file:
       - .env
     environment:
