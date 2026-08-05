@@ -62,6 +62,7 @@ allowed DB values (enabled / paused / archived). Unknown states are mapped to
 are stored as NULL.
 """
 import logging
+import time
 import urllib.parse
 from typing import Any
 
@@ -70,6 +71,51 @@ import requests
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Transport-level failures worth retrying. Amazon closes long-running
+# connections mid-pagination; a single drop must not discard the whole fetch.
+_RETRYABLE_EXCEPTIONS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+
+
+def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
+    """Issue a request, retrying transient failures with exponential backoff.
+
+    Retries on transport errors and on HTTP 429/5xx. Does NOT retry other 4xx
+    responses — those never succeed on retry and retrying just hammers Amazon.
+    Returns the final response for the caller to run through
+    _raise_for_amazon_error(), or re-raises the final transport exception.
+    """
+    attempts = max(1, settings.amazon_fetch_max_retries)
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = requests.request(method, url, **kwargs)
+            if (resp.status_code == 429 or resp.status_code >= 500) and attempt < attempts:
+                delay = settings.amazon_fetch_backoff_sec * (2 ** (attempt - 1))
+                logger.warning(
+                    "[amazon_ads] HTTP %d on %s — retry %d/%d in %.1fs",
+                    resp.status_code, url, attempt, attempts, delay,
+                )
+                time.sleep(delay)
+                continue
+            return resp
+        except _RETRYABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                raise
+            delay = settings.amazon_fetch_backoff_sec * (2 ** (attempt - 1))
+            logger.warning(
+                "[amazon_ads] %s on %s — retry %d/%d in %.1fs",
+                type(exc).__name__, url, attempt, attempts, delay,
+            )
+            time.sleep(delay)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"_request_with_retry exhausted without result for {url}")
 
 # Amazon LWA endpoints — stable, not regional.
 AMAZON_TOKEN_URL = "https://api.amazon.com/auth/o2/token"
@@ -456,7 +502,7 @@ def _post_list_paginated(
     page_count = 0
     was_truncated = False
     while True:
-        resp = requests.post(url, json=body, headers=headers, timeout=30)
+        resp = _request_with_retry("POST", url, json=body, headers=headers, timeout=30)
         _raise_for_amazon_error(resp)
         data = resp.json()
         items = data.get(data_key) or []
@@ -498,7 +544,7 @@ def _get_list_paginated_sb(
     was_truncated = False
     while True:
         params = {**base_params, "startIndex": start_index, "count": page_size}
-        resp = requests.get(url, params=params, headers=headers, timeout=30)
+        resp = _request_with_retry("GET", url, params=params, headers=headers, timeout=30)
         _raise_for_amazon_error(resp)
         data = resp.json()
         # SB GET endpoints may return a plain array or a wrapped object.

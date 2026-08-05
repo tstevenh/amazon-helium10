@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     amazon_mock_mode: bool = False
     amazon_full_sync_max_pages: int = 0  # 0 = unlimited; set >0 for emergency page cap
 
+    # Retry policy for paginated Amazon list fetches. A single dropped
+    # connection part-way through ~230 sequential page requests used to
+    # discard the entire fetch (observed 2026-08-04: ~215k keywords lost).
+    amazon_fetch_max_retries: int = 4
+    amazon_fetch_backoff_sec: float = 2.0
+
     # Performance sync: how many days of history to pull on first sync.
     # Subsequent syncs (already-synced profiles) use a 3-day rolling window.
     # Amazon Ads Reporting API typically supports up to 2 years (730 days).
