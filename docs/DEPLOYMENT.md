@@ -170,6 +170,52 @@ The `api` entrypoint runs migrations on start, so the explicit `alembic
 upgrade head` is belt-and-braces. The `worker` and `beat` containers clear the
 image entrypoint deliberately and do **not** run migrations.
 
+### ⚠️ Restart the worker whenever tasks change
+
+Celery registers tasks at worker startup from the `include` list in
+`app/worker/celery_app.py`. Adding a task, or changing a task's signature,
+requires **recreating the worker** — a running one will reject the unknown
+task with `KeyError: '<task_name>'` and, because Beat keeps firing on
+schedule, do so silently and repeatedly.
+
+This bit during development: Beat fired `check_sync_health` every 30 minutes
+for an hour while the worker rejected every one, because the worker predated
+the task being added.
+
+```bash
+docker compose up -d --force-recreate worker beat
+```
+
+Then confirm from the worker's own startup banner, rather than assuming:
+
+```bash
+docker compose logs worker --since 1m | sed -n '/\[tasks\]/,/celery@/p'
+```
+
+Expect `check_sync_health`, `enqueue_scheduled_syncs`, `ping`, `sync_account`.
+
+Note the app volume-mounts `app/`, so ordinary code edits take effect on
+restart — but the task *registry* is only read at startup.
+
+### Sync windows
+
+| Trigger | Window | Duration |
+|---|---|---|
+| Beat, every 6 h | 3-day rolling | ~30 min |
+| Sync All button | 3-day rolling | ~30 min |
+| A profile's first ever sync | 90 days (automatic) | 6–12 h |
+| `POST /sync-all?perf_days=90` | 90 days (deliberate backfill) | 6–12 h |
+
+The 3-day rolling window is not a shortcut: Amazon attributes conversions over
+7 days, so recent days genuinely need re-fetching while older days are final.
+History accumulates because performance rows are upserted per
+`(entity, date)` — **nothing ever deletes historical rows.**
+
+**Amazon only retains ~90–95 days of report data.** Anything older that you
+have not already captured is unrecoverable. Once past that window your
+Postgres is the *only* place the history exists, which is what makes the
+backup cron an asset rather than hygiene.
+
 ## Known limitations
 
 - **No writes to Amazon.** By deliberate team constraint, the app reads and
