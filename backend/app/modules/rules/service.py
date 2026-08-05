@@ -51,6 +51,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.search_terms.repository import SearchTermRepository
 from app.modules.suggestions.repository import SuggestionRepository
+from app.modules.suggestions.asin import asin_safe_suggestion_type
 from app.modules.rules.models import Rule
 from app.modules.rules.repository import RuleExecutionRepository
 
@@ -220,6 +221,13 @@ class RuleEngine:
     ) -> bool:
         """Create suggestion if no pending duplicate. Returns True if created."""
         search_term = row["search_term"]
+
+        # An ASIN search term is a product-targeting placement, so a keyword-
+        # typed suggestion for it is unactionable — Amazon accepts neither a
+        # positive nor a negative keyword for an ASIN. Applied here as well as
+        # in SuggestionEngine because both engines create suggestions, and
+        # fixing only one left this path still producing bad rows.
+        suggestion_type = asin_safe_suggestion_type(search_term, suggestion_type)
 
         if self.sugg_repo.pending_exists(rule.profile_id, search_term, suggestion_type):
             return False

@@ -23,7 +23,6 @@ HARVEST triggers (skip if pending already exists):
 """
 from __future__ import annotations
 import logging
-import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -32,23 +31,16 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.modules.search_terms.repository import SearchTermRepository
+from app.modules.suggestions import asin as _asin
 from app.modules.suggestions.repository import SuggestionRepository
 
 logger = logging.getLogger(__name__)
 
 _NON_PURCHASE_PREFIXES = ("how to", "free", "diy", "what is", "why ", "where to find")
 
-# Search terms that are ASINs come from product-targeting placements, not
-# customer text queries. Amazon will not accept an ASIN as a keyword, so
-# suggesting "add as Exact" for one is not actionable.
-#
-# Requiring the "0" avoids false positives on real 10-letter queries such as
-# "bluebottle" or "blackboard". Terms are already lowercased upstream.
-#
-# Limitation: book ASINs are ISBN-derived and do not start with B0, so those
-# would still be treated as keyword terms. Acceptable — this account sells
-# drinkware and gifts.
-_ASIN_RE = re.compile(r"^b0[a-z0-9]{8}$")
+# ASIN handling is shared with the rules engine — see suggestions/asin.py.
+# Re-exported so existing references and tests keep working.
+_ASIN_RE = _asin._ASIN_RE
 
 
 # ── Confidence scoring ─────────────────────────────────────────────────────────
