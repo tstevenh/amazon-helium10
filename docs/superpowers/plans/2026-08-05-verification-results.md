@@ -81,19 +81,46 @@ nonetheless returned `HTTP 200 "Performance sync complete"`.
 New default: 1,440 polls × 10 s = **4 hours**, configurable via
 `AMAZON_REPORT_POLL_MAX_ATTEMPTS`.
 
-## Performance sync — status
+## Performance sync — RESOLVED
 
-A 2-day performance sync was running when this document was written. The
-result determines whether `ad_group_rows` and `target_rows` become non-zero
-for the first time. Baseline before the run:
+2-day sync, 2026-08-05 10:34:38 → 11:03:21 (**28 min 43 s**, 3 profiles):
 
-| Table | Rows |
-|---|---|
-| campaign_performance_daily | 10 |
-| ad_group_performance_daily | **0** |
-| target_performance_daily | **0** |
+```
+"Performance sync complete: 10 campaign rows, 73 ad group rows, 72 target rows"
+```
 
-*(Section to be completed with the outcome.)*
+| Table | Before | After |
+|---|---|---|
+| campaign_performance_daily | 10 | **15** |
+| ad_group_performance_daily | **0** | **73** |
+| target_performance_daily | **0** | **72** |
+
+**`ad_group_rows` and `target_rows` are non-zero for the first time in the
+project's history.** Every prior attempt was abandoned at the 180-poll ceiling
+and reported as success.
+
+Sample of the keyword-level data — the layer the team chased for a month:
+
+| Date | Keyword | Match | Impressions | Clicks | Spend |
+|---|---|---|---|---|---|
+| 2026-08-04 | for chief | phrase | 68 | 0 | $0.00 |
+| 2026-08-04 | navy chief gifts | broad | 35 | 0 | $0.00 |
+| 2026-08-04 | chief gift | broad | 21 | 0 | $0.00 |
+| 2026-08-03 | firefighter mug | broad | 19 | 0 | $0.00 |
+| 2026-08-04 | sobriety gifts for women | exact | 13 | 1 | $0.40 |
+
+Note the run took 28 min versus 1 h 58 m for the same request on 2026-08-04 —
+further confirmation that Amazon's queue latency varies widely and is the
+reason a generous ceiling is required.
+
+### Open question: orders and sales are all zero
+
+Every performance row at every level shows `orders = 0` and `sales = 0.00`.
+Across the sampled window there was **1 click total**, so zero conversions is
+entirely plausible as genuine. But it is **not verified**: a longer window
+(30–90 days) compared against the Amazon Ads console is needed before
+declaring the conversion columns (`purchases7d`, `sales7d`) correct. Do not
+report this part as proven.
 
 ## Known remaining limitation
 
