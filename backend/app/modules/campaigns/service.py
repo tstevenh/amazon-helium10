@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core import amazon_ads
+from app.core.amazon_ads import PartialFetchError
 from app.modules.accounts.models import AdsProfile, SellerAccount
 from app.modules.accounts.repository import AdsProfileRepository, CredentialRepository
 from app.modules.accounts.service import AccountService
@@ -71,6 +72,9 @@ class CampaignSyncService:
             try:
                 raw = amazon_ads.list_campaigns(access_token, profile.amazon_profile_id)
                 return profile, raw, None
+            except PartialFetchError as exc:
+                # Keep the rows that DID arrive — they are still worth persisting.
+                return profile, exc.items, exc
             except Exception as exc:
                 return profile, [], exc
 
@@ -85,9 +89,18 @@ class CampaignSyncService:
         total_pages = 0
         total_rows = 0
         any_truncated = False
+        all_errors: list[str] = []
 
         for profile, raw_campaigns, fetch_error in fetch_results:
-            if fetch_error is not None:
+            # A PartialFetchError is recoverable: persist what arrived, record
+            # the failure, and skip soft-delete for THIS profile only.
+            partial_this_profile = False
+            if isinstance(fetch_error, PartialFetchError):
+                partial_this_profile = True
+                all_errors.extend(fetch_error.failures)
+                logger.error("[svc] sync_campaigns PARTIAL for profile %s: %s",
+                             profile.amazon_profile_id, fetch_error)
+            elif fetch_error is not None:
                 logger.error("Campaign fetch failed for profile %s: %s",
                              profile.amazon_profile_id, fetch_error)
                 raise HTTPException(
@@ -110,7 +123,15 @@ class CampaignSyncService:
                     detail=f"Campaign DB upsert failed for profile {profile.amazon_profile_id}: {exc}",
                 )
 
-            if raw_campaigns:
+            if partial_this_profile:
+                # CRITICAL: an incomplete fetch is NOT evidence that the absent
+                # rows are gone from Amazon — they simply were not retrieved.
+                # Soft-deleting them here would destroy live campaign data.
+                logger.warning(
+                    "[svc] campaign soft_delete_missing SKIPPED profile=%s (partial fetch)",
+                    profile.amazon_profile_id,
+                )
+            elif raw_campaigns:
                 logger.warning("[svc] campaign soft_delete_missing profile=%s seen=%d",
                                profile.amazon_profile_id, len(seen_ids))
                 deleted = self.campaign_repo.soft_delete_missing(profile.id, seen_ids)
@@ -121,9 +142,14 @@ class CampaignSyncService:
                 logger.warning("[svc] campaign soft_delete_missing SKIPPED profile=%s (Amazon returned empty)",
                                profile.amazon_profile_id)
 
-        logger.warning("[svc] sync_campaigns done: upserted=%d deleted=%d skipped=%d",
-                       total_upserted, total_deleted, total_skipped)
-        return {"upserted": total_upserted, "soft_deleted": total_deleted}
+        logger.warning("[svc] sync_campaigns done: upserted=%d deleted=%d skipped=%d errors=%d",
+                       total_upserted, total_deleted, total_skipped, len(all_errors))
+        return {
+            "upserted": total_upserted,
+            "soft_deleted": total_deleted,
+            "errors": all_errors,
+            "partial": bool(all_errors),
+        }
 
     # ── Ad Group sync ─────────────────────────────────────────────────────
 
@@ -138,6 +164,9 @@ class CampaignSyncService:
             try:
                 raw = amazon_ads.list_ad_groups(access_token, profile.amazon_profile_id)
                 return profile, raw, None
+            except PartialFetchError as exc:
+                # Keep the rows that DID arrive — they are still worth persisting.
+                return profile, exc.items, exc
             except Exception as exc:
                 return profile, [], exc
 
@@ -153,9 +182,16 @@ class CampaignSyncService:
         total_rows = 0
         any_truncated = False
         all_campaign_ids: list[uuid.UUID] = []
+        all_errors: list[str] = []
 
         for profile, raw_ad_groups, fetch_error in fetch_results:
-            if fetch_error is not None:
+            partial_this_profile = False
+            if isinstance(fetch_error, PartialFetchError):
+                partial_this_profile = True
+                all_errors.extend(fetch_error.failures)
+                logger.error("[svc] sync_ad_groups PARTIAL for profile %s: %s",
+                             profile.amazon_profile_id, fetch_error)
+            elif fetch_error is not None:
                 logger.error("Ad group fetch failed for profile %s: %s",
                              profile.amazon_profile_id, fetch_error)
                 raise HTTPException(
@@ -211,7 +247,14 @@ class CampaignSyncService:
             campaign_ids = [c.id for c in db_campaigns.values()]
             all_campaign_ids.extend(campaign_ids)
 
-            if raw_ad_groups:
+            if partial_this_profile:
+                # CRITICAL: incomplete fetch — absent rows were not retrieved,
+                # not deleted on Amazon. Soft-deleting would destroy live data.
+                logger.warning(
+                    "[svc] ad_group soft_delete_missing SKIPPED profile=%s (partial fetch)",
+                    profile.amazon_profile_id,
+                )
+            elif raw_ad_groups:
                 logger.warning("[svc] ad_group soft_delete_missing profile=%s campaign_ids=%d seen=%d",
                                profile.amazon_profile_id, len(campaign_ids), len(seen_ids))
                 deleted = self.ad_group_repo.soft_delete_missing(campaign_ids, seen_ids)
@@ -222,9 +265,14 @@ class CampaignSyncService:
                 logger.warning("[svc] ad_group soft_delete_missing SKIPPED profile=%s (Amazon returned empty)",
                                profile.amazon_profile_id)
 
-        logger.warning("[svc] sync_ad_groups done: upserted=%d deleted=%d skipped=%d",
-                       total_upserted, total_deleted, total_skipped)
-        return {"upserted": total_upserted, "soft_deleted": total_deleted}
+        logger.warning("[svc] sync_ad_groups done: upserted=%d deleted=%d skipped=%d errors=%d",
+                       total_upserted, total_deleted, total_skipped, len(all_errors))
+        return {
+            "upserted": total_upserted,
+            "soft_deleted": total_deleted,
+            "errors": all_errors,
+            "partial": bool(all_errors),
+        }
 
     # ── Target sync ───────────────────────────────────────────────────────
 
@@ -239,6 +287,10 @@ class CampaignSyncService:
             try:
                 raw, was_truncated, pages, rows = amazon_ads.list_targets(access_token, profile.amazon_profile_id)
                 return profile, raw, was_truncated, pages, rows, None
+            except PartialFetchError as exc:
+                # Keep the rows that DID arrive. was_truncated=True marks the
+                # view as incomplete so downstream soft-delete is skipped.
+                return profile, exc.items, True, 0, len(exc.items), exc
             except Exception as exc:
                 return profile, [], False, 0, 0, exc
 
@@ -253,9 +305,16 @@ class CampaignSyncService:
         total_pages = 0
         total_rows = 0
         any_truncated = False
+        all_errors: list[str] = []
 
         for profile, raw_targets, was_truncated, pages, rows, fetch_error in fetch_results:
-            if fetch_error is not None:
+            partial_this_profile = False
+            if isinstance(fetch_error, PartialFetchError):
+                partial_this_profile = True
+                all_errors.extend(fetch_error.failures)
+                logger.error("[svc] sync_targets PARTIAL for profile %s: %s",
+                             profile.amazon_profile_id, fetch_error)
+            elif fetch_error is not None:
                 logger.error("Target fetch failed for profile %s: %s",
                              profile.amazon_profile_id, fetch_error)
                 raise HTTPException(
@@ -339,12 +398,21 @@ class CampaignSyncService:
                 logger.warning("[svc] target soft_delete_missing SKIPPED profile=%s (Amazon returned empty)",
                                profile.amazon_profile_id)
 
-        logger.warning("[svc] sync_targets done: upserted=%d deleted=%d skipped=%d pages=%d rows=%d truncated=%s",
-                       total_upserted, total_deleted, total_skipped, total_pages, total_rows, any_truncated)
+        logger.warning("[svc] sync_targets done: upserted=%d deleted=%d skipped=%d pages=%d rows=%d truncated=%s errors=%d",
+                       total_upserted, total_deleted, total_skipped, total_pages, total_rows,
+                       any_truncated, len(all_errors))
         warnings = []
         if any_truncated:
             warnings.append(f"Full sync capped at {total_pages} pages ({total_rows} rows). Set AMAZON_FULL_SYNC_MAX_PAGES=0 for unlimited.")
-        return {"upserted": total_upserted, "soft_deleted": total_deleted, "partial": any_truncated, "warnings": warnings, "pages_fetched": total_pages, "rows_fetched": total_rows}
+        return {
+            "upserted": total_upserted,
+            "soft_deleted": total_deleted,
+            "partial": any_truncated or bool(all_errors),
+            "errors": all_errors,
+            "warnings": warnings,
+            "pages_fetched": total_pages,
+            "rows_fetched": total_rows,
+        }
 
     # ── Sync all ──────────────────────────────────────────────────────────
 
