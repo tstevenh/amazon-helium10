@@ -1,25 +1,26 @@
 """
 Campaigns router — Sprint 1C / Sprint 4B.
 
-sync-all is fire-and-forget: POST returns 202 immediately, backend runs
-structure sync (campaigns/adgroups/targets) THEN performance sync in a
-daemon thread. GET sync-status lets the frontend poll until running=false.
+sync-all enqueues a Celery task and returns 202 immediately with a job_id.
+The worker runs structure sync (campaigns/adgroups/targets) then performance
+sync, writing progress to the sync_jobs table. GET sync-status lets the
+frontend poll until running=false; because job state is in Postgres it
+survives restarts and is visible across API workers.
 """
 import logging
-import threading
-import traceback as _tb
 import uuid
-from datetime import datetime, timezone as tz
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, get_db
+from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.modules.accounts.repository import SellerAccountRepository
 from app.modules.audit_log.repository import AuditLogRepository
+from app.modules.sync_jobs.repository import ACTIVE_STATUSES, SyncJobRepository
+from app.worker.tasks import sync_account
 from app.modules.campaigns.repository import (
     AdGroupRepository,
     CampaignRepository,
@@ -40,11 +41,6 @@ campaigns_router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 ad_groups_router = APIRouter(prefix="/ad-groups", tags=["ad-groups"])
 targets_router   = APIRouter(prefix="/targets",   tags=["targets"])
 sync_router      = APIRouter(prefix="/accounts",  tags=["sync"])
-
-# ── In-memory sync job state ────────────────────────────────────────────────
-_sync_jobs: dict[str, dict] = {}
-_sync_lock = threading.Lock()
-
 
 # ── Helper ────────────────────────────────────────────────────────────────
 
@@ -71,84 +67,6 @@ def _audit(db: Session, user_id, account_id: uuid.UUID, action: str, extra: dict
             db.rollback()
         except Exception:
             pass
-
-
-# ── Background sync runner ─────────────────────────────────────────────────
-
-def _run_sync_background(account_id_str: str, user_id, account_id: uuid.UUID) -> None:
-    """
-    Full sync in a daemon thread:
-    1. Sync structure (campaigns / ad groups / targets) from Amazon management API
-    2. Sync performance metrics from Amazon Reporting API
-    """
-    # Lazy import to avoid circular import at module load time
-    from app.modules.performance.service import PerformanceService
-
-    started_at = datetime.now(tz.utc).isoformat()
-    with _sync_lock:
-        _sync_jobs[account_id_str] = {
-            "running": True,
-            "started_at": started_at,
-            "completed_at": None,
-            "error": None,
-            "result": None,
-        }
-
-    db = SessionLocal()
-    try:
-        account = SellerAccountRepository(db).get_by_id(account_id)
-        if account is None:
-            raise ValueError(f"Account {account_id} not found in background thread")
-
-        # Step 1: structure sync
-        svc = CampaignSyncService(db)
-        result = svc.sync_all(account)
-        logger.warning("[sync_all_bg] Structure sync DONE for account %s", account_id_str)
-
-        # Step 2: performance metrics sync
-        perf_rows = {"perf_campaign_rows": 0, "perf_ad_group_rows": 0, "perf_target_rows": 0}
-        try:
-            perf_svc = PerformanceService(db)
-            perf_result = perf_svc.sync_performance(account, force_full=True)
-            perf_rows["perf_campaign_rows"] = perf_result.campaign_rows
-            perf_rows["perf_ad_group_rows"] = perf_result.ad_group_rows
-            perf_rows["perf_target_rows"]   = perf_result.target_rows
-            logger.warning(
-                "[sync_all_bg] Perf sync DONE camp=%d ag=%d tgt=%d",
-                perf_result.campaign_rows, perf_result.ad_group_rows, perf_result.target_rows,
-            )
-        except Exception as perf_exc:
-            logger.error("[sync_all_bg] Perf sync failed (non-fatal): %s", perf_exc)
-            perf_rows["perf_error"] = str(perf_exc)
-
-        if isinstance(result, dict):
-            result.update(perf_rows)
-
-        _audit(db, user_id, account_id, "sync_all", result)
-        with _sync_lock:
-            _sync_jobs[account_id_str] = {
-                "running": False,
-                "started_at": started_at,
-                "completed_at": datetime.now(tz.utc).isoformat(),
-                "error": None,
-                "result": result,
-            }
-    except Exception as exc:
-        logger.error("[sync_all_bg] Error for account %s: %s\n%s", account_id_str, exc, _tb.format_exc())
-        with _sync_lock:
-            _sync_jobs[account_id_str] = {
-                "running": False,
-                "started_at": started_at,
-                "completed_at": datetime.now(tz.utc).isoformat(),
-                "error": f"{type(exc).__name__}: {exc}",
-                "result": None,
-            }
-        try:
-            db.rollback()
-        except Exception:
-            pass
-    finally:
-        db.close()
 
 
 # ── Campaign endpoints ────────────────────────────────────────────────────
@@ -356,19 +274,24 @@ def get_sync_status(
     def _iso(ts):
         return ts.isoformat() if ts else None
 
-    with _sync_lock:
-        job = dict(_sync_jobs.get(str(account_id), {}))
+    # Job state comes from sync_jobs, so it survives restarts and is visible
+    # across API workers. `running` keeps its original meaning and name — the
+    # account detail page already polls and reads it.
+    job = SyncJobRepository(db).latest_for_account(account_id)
 
     return JSONResponse(content={
         "campaigns": {"count": int(row.campaign_count or 0), "last_synced_at": _iso(row.campaign_last_at)},
         "ad_groups": {"count": int(row.ad_group_count or 0), "last_synced_at": _iso(row.ad_group_last_at)},
         "targets":   {"count": int(row.target_count or 0),   "last_synced_at": _iso(row.target_last_at)},
         "sync_job": {
-            "running":      job.get("running", False),
-            "started_at":   job.get("started_at"),
-            "completed_at": job.get("completed_at"),
-            "error":        job.get("error"),
-            "result":       job.get("result"),
+            "job_id":         str(job.id) if job else None,
+            "running":        job.status in ACTIVE_STATUSES if job else False,
+            "status":         job.status if job else None,
+            "started_at":     _iso(job.started_at) if job else None,
+            "completed_at":   _iso(job.finished_at) if job else None,
+            "error":          job.error_message if job else None,
+            "result":         job.result_json if job else None,
+            "records_synced": job.records_synced if job else 0,
         },
     })
 
@@ -380,30 +303,34 @@ def sync_all(
     current_user: User = Depends(require_admin),
 ) -> JSONResponse:
     """
-    Fire-and-forget full sync (structure + performance). Returns 202 immediately.
-    Returns 409 if a sync is already running for this account.
+    Enqueue a full sync (structure + performance) and return immediately.
+
+    Returns 202 with a job_id. Poll GET /accounts/{id}/sync-status for
+    progress. Returns 409 if a sync is already queued or running for this
+    account — checked against the sync_jobs table, so the guard holds across
+    API workers and container restarts.
+
+    A 30-day sync was measured at 51 minutes, so this must not be awaited
+    inside a request: the Next.js proxy gives up at 20 minutes and the
+    browser far sooner.
     """
-    account_id_str = str(account_id)
-
-    with _sync_lock:
-        if _sync_jobs.get(account_id_str, {}).get("running"):
-            return JSONResponse(
-                status_code=409,
-                content={"detail": "Sync already in progress for this account"},
-            )
-
     _get_account_or_404(account_id, db)
 
-    thread = threading.Thread(
-        target=_run_sync_background,
-        args=(account_id_str, current_user.id, account_id),
-        daemon=True,
-        name=f"sync-{account_id_str[:8]}",
-    )
-    thread.start()
-    logger.warning("[sync_all] Background thread started for account %s", account_id_str)
+    jobs = SyncJobRepository(db)
+    if jobs.has_active(account_id):
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Sync already queued or running for this account"},
+        )
+
+    job = jobs.create(job_type="sync_all", seller_account_id=account_id)
+    sync_account.delay(str(job.id), str(account_id))
+
+    _audit(db, current_user.id, account_id, "sync_all_enqueued", {"job_id": str(job.id)})
+    logger.warning("[sync_all] enqueued job %s for account %s", job.id, account_id)
 
     return JSONResponse(status_code=202, content={
-        "message": "Sync started — poll GET /accounts/{id}/sync-status for progress",
-        "status": "running",
+        "message": "Sync queued — poll GET /accounts/{id}/sync-status for progress",
+        "status": "queued",
+        "job_id": str(job.id),
     })
