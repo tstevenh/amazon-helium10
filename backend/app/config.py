@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     amazon_fetch_max_retries: int = 4
     amazon_fetch_backoff_sec: float = 2.0
 
+    # Amazon report generation is queued on their side and highly variable —
+    # measured 23 min and 40 min for the identical 2-day report on the same
+    # day (2026-08-04). The old hardcoded 180-poll (~40 min) ceiling meant
+    # ad-group and keyword reports were abandoned every single time.
+    amazon_report_poll_max_attempts: int = 1440   # 1440 x 10s = 4 hours
+    amazon_report_poll_interval_sec: int = 10
+
     # Performance sync: how many days of history to pull on first sync.
     # Subsequent syncs (already-synced profiles) use a 3-day rolling window.
     # Amazon Ads Reporting API typically supports up to 2 years (730 days).

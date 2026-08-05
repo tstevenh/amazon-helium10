@@ -72,9 +72,9 @@ _TARGETING_METRICS = [
     "clickThroughRate", "costPerClick",
 ]
 
-# Poll settings
-_POLL_MAX_ATTEMPTS = 180    # 180 × 10s = 30 minutes max
-_POLL_INTERVAL_SEC = 10
+# Poll settings — see settings.amazon_report_poll_max_attempts /
+# amazon_report_poll_interval_sec. Read inside _poll_report so they can be
+# overridden per-environment and monkeypatched in tests.
 _REPORT_MAX_DAYS   = 31     # Amazon SP Reporting API v3: max 31 days per request
 
 
@@ -143,18 +143,28 @@ def _poll_report(access_token: str, profile_id: int, report_id: str) -> dict[str
         "Amazon-Advertising-API-Scope": str(profile_id),
         "Accept": "application/vnd.createasyncreportrequest.v3+json",
     }
-    for attempt in range(1, _POLL_MAX_ATTEMPTS + 1):
+    max_attempts = settings.amazon_report_poll_max_attempts
+    interval = settings.amazon_report_poll_interval_sec
+    for attempt in range(1, max_attempts + 1):
         resp = requests.get(url, headers=poll_headers, timeout=30)
         _raise_for_amazon_error(resp)
         data = resp.json()
         status = data.get("status", "")
-        logger.warning("[reporting] Poll attempt %d report %s status=%s", attempt, report_id, status)
+        # Log the first poll then once a minute — 1440 lines per report is noise.
+        if attempt == 1 or attempt % 6 == 0:
+            logger.info("[reporting] Poll attempt %d/%d report %s status=%s",
+                        attempt, max_attempts, report_id, status)
         if status == "COMPLETED":
+            logger.warning("[reporting] Report %s COMPLETED after %d polls (%ds)",
+                           report_id, attempt, attempt * interval)
             return data
         if status in ("FAILURE", "CANCELLED"):
             raise AmazonApiError(f"Report {report_id} ended with status {status}: {data.get('statusDetails', '')}")
-        time.sleep(_POLL_INTERVAL_SEC)
-    raise RuntimeError(f"Report {report_id} did not complete after {_POLL_MAX_ATTEMPTS} polls")
+        time.sleep(interval)
+    raise RuntimeError(
+        f"Report {report_id} did not complete after {max_attempts} polls "
+        f"({max_attempts * interval}s)"
+    )
 
 
 def _download_report(report_url: str) -> list[dict[str, Any]]:
