@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     # Periodic full sync interval. 0 disables the schedule entirely.
     sync_schedule_hours: int = 6
 
+    # Failure alerting. POSTs JSON to this URL (Slack/Discord/n8n webhook).
+    # Empty disables delivery — send_alert() logs at ERROR and returns False.
+    # A missing alert channel must never crash the scheduler, but it must
+    # also never look like success.
+    alert_webhook_url: str = ""
+    # An account with no successful sync in this many hours is "stale".
+    # A sync that silently never runs is as damaging as one that errors.
+    sync_stale_after_hours: int = 24
+    health_check_interval_minutes: int = 30
+
     # Performance sync: how many days of history to pull on first sync.
     # Subsequent syncs (already-synced profiles) use a 3-day rolling window.
     # Amazon Ads Reporting API typically supports up to 2 years (730 days).

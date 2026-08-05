@@ -22,7 +22,7 @@ celery_app = Celery(
     "ppc_os",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.worker.tasks", "app.worker.schedule"],
+    include=["app.worker.tasks", "app.worker.schedule", "app.worker.health"],
 )
 
 celery_app.conf.update(
@@ -53,6 +53,12 @@ def build_beat_schedule(hours: int) -> dict:
             "task": "enqueue_scheduled_syncs",
             "schedule": float(hours * 60 * 60),
         }
+    # The health check runs regardless of whether periodic sync is enabled —
+    # a manually-triggered sync can fail just as silently.
+    schedule["check-sync-health"] = {
+        "task": "check_sync_health",
+        "schedule": float(settings.health_check_interval_minutes * 60),
+    }
     return schedule
 
 

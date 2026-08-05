@@ -108,6 +108,24 @@ def _startup_checks() -> None:
             )
 
 
+@app.get("/health/sync")
+def health_sync() -> dict:
+    """Sync freshness, for uptime monitors and the UI.
+
+    Unauthenticated so a monitor can watch it without credentials. Exposes no
+    ad data — only account ids, names and timestamps. Always returns 200;
+    read the `healthy` field rather than relying on the status code.
+    """
+    from app.database import SessionLocal
+    from app.worker.health import collect_sync_health
+
+    db = SessionLocal()
+    try:
+        return collect_sync_health(db, settings.sync_stale_after_hours)
+    finally:
+        db.close()
+
+
 @app.get("/health")
 def health() -> dict:
     mode = "mock" if settings.amazon_mock_mode else "real"
