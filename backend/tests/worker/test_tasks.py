@@ -72,3 +72,27 @@ def test_celery_args_are_json_safe():
     src = inspect.getsource(tasks.sync_account)
     assert "uuid.UUID(job_id)" in src
     assert "uuid.UUID(account_id)" in src
+
+
+def test_force_full_defaults_to_false():
+    """A 90-day sync is 18 Amazon reports and 6-12 hours. Forcing it on every
+    scheduled run (every 6h) would grind against Amazon's queue non-stop and
+    never converge.
+
+    PerformanceService already picks correctly when force_full is False:
+    90 days on a profile's first sync (last_perf_synced_at is None), else a
+    3-day rolling window — which is right because Amazon attributes
+    conversions over 7 days, so only recent days need re-fetching.
+    """
+    sig = inspect.signature(tasks.sync_account.__wrapped__)
+
+    assert "force_full" in sig.parameters, "must be explicit, not hardcoded"
+    assert sig.parameters["force_full"].default is False, (
+        "scheduled syncs must not force a 90-day backfill every run"
+    )
+
+
+def test_force_full_is_passed_through_not_hardcoded():
+    src = inspect.getsource(tasks.sync_account)
+    assert "force_full=force_full" in src, "must forward the argument"
+    assert "force_full=True" not in src, "must not hardcode the full lookback"

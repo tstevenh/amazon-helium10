@@ -299,6 +299,15 @@ def get_sync_status(
 @sync_router.post("/{account_id}/sync-all")
 def sync_all(
     account_id: uuid.UUID,
+    perf_days: Optional[int] = Query(
+        None,
+        ge=1,
+        le=90,
+        description="Days of performance history. Omit for the routine 3-day "
+                    "rolling window (90 days automatically on a first sync). "
+                    "Set 90 for a deliberate backfill — that is ~18 Amazon "
+                    "reports and can take 6-12 hours.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ) -> JSONResponse:
@@ -324,13 +333,16 @@ def sync_all(
         )
 
     job = jobs.create(job_type="sync_all", seller_account_id=account_id)
-    sync_account.delay(str(job.id), str(account_id))
+    sync_account.delay(str(job.id), str(account_id), perf_days)
 
-    _audit(db, current_user.id, account_id, "sync_all_enqueued", {"job_id": str(job.id)})
-    logger.warning("[sync_all] enqueued job %s for account %s", job.id, account_id)
+    _audit(db, current_user.id, account_id, "sync_all_enqueued",
+           {"job_id": str(job.id), "perf_days": perf_days})
+    logger.warning("[sync_all] enqueued job %s for account %s (perf_days=%s)",
+                   job.id, account_id, perf_days)
 
     return JSONResponse(status_code=202, content={
         "message": "Sync queued — poll GET /accounts/{id}/sync-status for progress",
         "status": "queued",
         "job_id": str(job.id),
+        "perf_days": perf_days,
     })

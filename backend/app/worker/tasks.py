@@ -20,13 +20,34 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="sync_account", bind=True)
-def sync_account(self, job_id: str, account_id: str, perf_days: int | None = None) -> dict:
+def sync_account(
+    self,
+    job_id: str,
+    account_id: str,
+    perf_days: int | None = None,
+    force_full: bool = False,
+) -> dict:
     """Full sync: campaign/ad group/target structure, then performance.
 
     Args:
         job_id:     sync_jobs row to report progress into.
         account_id: SellerAccount UUID as a string (Celery args are JSON).
-        perf_days:  Days of performance history; None uses the service default.
+        perf_days:  Explicit days of performance history. None lets
+                    PerformanceService choose: 90 days on a profile's first
+                    ever sync, otherwise a 3-day rolling window.
+        force_full: Force the full 90-day lookback. Use only for a deliberate
+                    backfill.
+
+    Why force_full defaults to False
+    --------------------------------
+    A 90-day sync is 18 Amazon reports and takes 6-12 hours. Forcing it on
+    every scheduled run (every 6 hours) would grind against Amazon's report
+    queue continuously and never converge. The 3-day rolling window is both
+    fast and correct: Amazon attributes conversions over 7 days, so recent
+    days need re-fetching, but older days are already final.
+
+    A profile that has never synced still gets the full 90 days, because
+    PerformanceService checks last_perf_synced_at.
     """
     # Imported here to avoid a circular import at module load.
     from app.modules.performance.service import PerformanceService
@@ -55,7 +76,7 @@ def sync_account(self, job_id: str, account_id: str, perf_days: int | None = Non
         }
         try:
             perf = PerformanceService(db).sync_performance(
-                account, days=perf_days, force_full=True
+                account, days=perf_days, force_full=force_full
             )
             perf_rows["perf_campaign_rows"] = perf.campaign_rows
             perf_rows["perf_ad_group_rows"] = perf.ad_group_rows
