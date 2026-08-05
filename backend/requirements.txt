@@ -1,0 +1,20 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+sqlalchemy==2.0.31
+psycopg2-binary==2.9.9
+alembic==1.13.2
+pydantic==2.8.2
+pydantic-settings==2.3.4
+pyjwt==2.8.0
+passlib[bcrypt]==1.7.4
+# Pinned: passlib 1.7.4's bcrypt backend reads bcrypt.__about__.__version__ to detect the
+# installed bcrypt version. That attribute was removed in bcrypt 4.1.0+, which makes every
+# hash_password()/verify_password() call raise AttributeError on first use otherwise.
+# bcrypt 4.0.1 is the latest release that still exposes __about__ — pinning here prevents
+# passlib[bcrypt]'s unpinned transitive dependency from silently installing a broken combo.
+bcrypt==4.0.1
+python-multipart==0.0.9
+email-validator==2.2.0
+# Sprint 1B additions
+cryptography==42.0.8
+requests==2.32.3
