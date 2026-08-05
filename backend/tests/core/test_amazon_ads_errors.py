@@ -63,3 +63,47 @@ def test_connection_drop_mid_fetch_raises(fake_requests):
 
     with pytest.raises(PartialFetchError):
         amazon_ads.list_campaigns("tok", 123)
+
+
+def test_list_ad_groups_raises_when_sp_fails(fake_requests):
+    fake_requests.queue_response("POST", "/sp/adGroups/list", 502, {"code": "E", "details": "d"})
+    fake_requests.queue_response("POST", "/sb/v4/adGroups/list", 200, {"adGroups": []})
+
+    with pytest.raises(PartialFetchError):
+        amazon_ads.list_ad_groups("tok", 123)
+
+
+def test_list_targets_raises_and_keeps_partial_keywords(fake_requests):
+    """The 215k-keyword-loss regression test.
+
+    SP keywords dies on a dropped connection; SB keywords succeed. The caller
+    must be told, and must still receive the SB rows.
+    """
+    from requests.exceptions import ConnectionError as ReqConnectionError
+
+    fake_requests.queue_exception("POST", "/sp/keywords/list", ReqConnectionError("Remote end closed connection"))
+    fake_requests.queue_response("POST", "/sp/targets/list", 200, {"targetingClauses": []})
+    fake_requests.queue_response(
+        "GET", "/sb/keywords", 200,
+        [{"keywordId": "9001", "adGroupId": "500", "matchType": "EXACT",
+          "keywordText": "mug", "bid": 1.0, "state": "ENABLED"}],
+    )
+
+    with pytest.raises(PartialFetchError) as excinfo:
+        amazon_ads.list_targets("tok", 123)
+
+    assert any("SP keywords" in f for f in excinfo.value.failures)
+    assert len(excinfo.value.items) == 1
+    assert excinfo.value.items[0]["amazon_target_id"] == 9001
+
+
+def test_list_targets_succeeds_quietly_when_all_sources_ok(fake_requests):
+    fake_requests.queue_response("POST", "/sp/keywords/list", 200, {"keywords": []})
+    fake_requests.queue_response("POST", "/sp/targets/list", 200, {"targetingClauses": []})
+    fake_requests.queue_response("GET", "/sb/keywords", 200, [])
+
+    targets, truncated, pages, rows = amazon_ads.list_targets("tok", 123)
+
+    assert targets == []
+    assert truncated is False
+    assert rows == 0

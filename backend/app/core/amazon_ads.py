@@ -811,6 +811,7 @@ def list_ad_groups(access_token: str, profile_id: int) -> list[dict[str, Any]]:
         return data
 
     ad_groups: list[dict[str, Any]] = []
+    failures: list[str] = []
 
     # --- SP Ad Groups v3 ---
     try:
@@ -824,11 +825,11 @@ def list_ad_groups(access_token: str, profile_id: int) -> list[dict[str, Any]]:
             headers, body, "adGroups",
         )
         ad_groups.extend(_normalize_ad_group_v3(g) for g in raw)
-        logger.warning("[amazon_ads] SP ad groups v3 profile=%s: %d ad groups", profile_id, len(raw))
-    except AmazonApiError as exc:
-        logger.warning("[amazon_ads] SP ad groups v3 fetch failed for profile %s: %s", profile_id, exc)
+        logger.info("[amazon_ads] SP ad groups v3 profile=%s: %d ad groups", profile_id, len(raw))
     except Exception as exc:
-        logger.warning("[amazon_ads] SP ad groups v3 fetch failed for profile %s: %s", profile_id, exc)
+        msg = f"SP ad groups fetch failed for profile {profile_id}: {exc}"
+        logger.error("[amazon_ads] %s", msg)
+        failures.append(msg)
 
     # --- SB Ad Groups v4 ---
     try:
@@ -842,12 +843,18 @@ def list_ad_groups(access_token: str, profile_id: int) -> list[dict[str, Any]]:
             headers, body, "adGroups",
         )
         ad_groups.extend(_normalize_sb_ad_group_v4(g) for g in raw)
-        logger.warning("[amazon_ads] SB ad groups v4 profile=%s: %d ad groups", profile_id, len(raw))
-    except AmazonApiError as exc:
-        logger.warning("[amazon_ads] SB ad groups v4 fetch failed for profile %s: %s", profile_id, exc)
+        logger.info("[amazon_ads] SB ad groups v4 profile=%s: %d ad groups", profile_id, len(raw))
     except Exception as exc:
-        logger.warning("[amazon_ads] SB ad groups v4 fetch failed for profile %s: %s", profile_id, exc)
+        msg = f"SB ad groups fetch failed for profile {profile_id}: {exc}"
+        logger.error("[amazon_ads] %s", msg)
+        failures.append(msg)
 
+    if failures:
+        raise PartialFetchError(
+            f"Ad group fetch incomplete for profile {profile_id}: " + "; ".join(failures),
+            ad_groups,
+            failures,
+        )
     return ad_groups
 
 
@@ -871,6 +878,7 @@ def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any
         return data, False, 0, len(data)
 
     targets: list[dict[str, Any]] = []
+    failures: list[str] = []
     was_truncated = False
 
     # Safety cap: 0 = unlimited full sync (default). Set AMAZON_FULL_SYNC_MAX_PAGES>0 for emergency guard.
@@ -894,11 +902,11 @@ def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any
             was_truncated = True
             logger.warning("[amazon_ads] SP keywords TRUNCATED profile=%s pages=%d rows=%d cap=%d", profile_id, kw_pages, len(raw), max_pages_cap)
         targets.extend(_normalize_keyword_v3(k) for k in raw)
-        logger.warning("[amazon_ads] SP keywords v3 profile=%s: %d keywords pages=%d", profile_id, len(raw), kw_pages)
-    except AmazonApiError as exc:
-        logger.warning("[amazon_ads] SP keywords v3 fetch failed for profile %s: %s", profile_id, exc)
+        logger.info("[amazon_ads] SP keywords v3 profile=%s: %d keywords pages=%d", profile_id, len(raw), kw_pages)
     except Exception as exc:
-        logger.warning("[amazon_ads] SP keywords v3 fetch failed for profile %s: %s", profile_id, exc)
+        msg = f"SP keywords fetch failed for profile {profile_id}: {exc}"
+        logger.error("[amazon_ads] %s", msg)
+        failures.append(msg)
 
     # --- SP Product Targets v3 ---
     # Response key is "targetingClauses", not "targets"
@@ -919,11 +927,11 @@ def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any
             was_truncated = True
             logger.warning("[amazon_ads] SP targets TRUNCATED profile=%s pages=%d rows=%d cap=%d", profile_id, pt_pages, len(raw), max_pages_cap)
         targets.extend(_normalize_product_target_v3(t) for t in raw)
-        logger.warning("[amazon_ads] SP product targets v3 profile=%s: %d targets pages=%d", profile_id, len(raw), pt_pages)
-    except AmazonApiError as exc:
-        logger.warning("[amazon_ads] SP product targets v3 fetch failed for profile %s: %s", profile_id, exc)
+        logger.info("[amazon_ads] SP product targets v3 profile=%s: %d targets pages=%d", profile_id, len(raw), pt_pages)
     except Exception as exc:
-        logger.warning("[amazon_ads] SP product targets v3 fetch failed for profile %s: %s", profile_id, exc)
+        msg = f"SP product targets fetch failed for profile {profile_id}: {exc}"
+        logger.error("[amazon_ads] %s", msg)
+        failures.append(msg)
 
     # --- SB Keywords (GET /sb/keywords, offset-based pagination) ---
     # NOTE: /sb/v4/keywords/list does not exist — Amazon returns a misleading 403.
@@ -947,15 +955,21 @@ def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any
         )
         total_pages += sb_pages
         targets.extend(_normalize_sb_keyword_v3(k) for k in raw)
-        logger.warning("[amazon_ads] SB keywords GET profile=%s: %d keywords pages=%d", profile_id, len(raw), sb_pages)
-    except AmazonApiError as exc:
-        logger.warning("[amazon_ads] SB keywords GET failed for profile %s: %s", profile_id, exc)
+        logger.info("[amazon_ads] SB keywords GET profile=%s: %d keywords pages=%d", profile_id, len(raw), sb_pages)
     except Exception as exc:
-        logger.warning("[amazon_ads] SB keywords GET failed for profile %s: %s", profile_id, exc)
+        msg = f"SB keywords fetch failed for profile {profile_id}: {exc}"
+        logger.error("[amazon_ads] %s", msg)
+        failures.append(msg)
 
     total_rows = len(targets)
-    logger.warning(
-        "[amazon_ads] list_targets COMPLETE profile=%s pages=%d rows=%d truncated=%s cap=%d",
-        profile_id, total_pages, total_rows, was_truncated, max_pages_cap,
+    logger.info(
+        "[amazon_ads] list_targets COMPLETE profile=%s pages=%d rows=%d truncated=%s cap=%d failures=%d",
+        profile_id, total_pages, total_rows, was_truncated, max_pages_cap, len(failures),
     )
+    if failures:
+        raise PartialFetchError(
+            f"Target fetch incomplete for profile {profile_id}: " + "; ".join(failures),
+            targets,
+            failures,
+        )
     return targets, was_truncated, total_pages, total_rows
