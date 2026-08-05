@@ -23,6 +23,7 @@ HARVEST triggers (skip if pending already exists):
 """
 from __future__ import annotations
 import logging
+import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -36,6 +37,18 @@ from app.modules.suggestions.repository import SuggestionRepository
 logger = logging.getLogger(__name__)
 
 _NON_PURCHASE_PREFIXES = ("how to", "free", "diy", "what is", "why ", "where to find")
+
+# Search terms that are ASINs come from product-targeting placements, not
+# customer text queries. Amazon will not accept an ASIN as a keyword, so
+# suggesting "add as Exact" for one is not actionable.
+#
+# Requiring the "0" avoids false positives on real 10-letter queries such as
+# "bluebottle" or "blackboard". Terms are already lowercased upstream.
+#
+# Limitation: book ASINs are ISBN-derived and do not start with B0, so those
+# would still be treated as keyword terms. Acceptable — this account sells
+# drinkware and gifts.
+_ASIN_RE = re.compile(r"^b0[a-z0-9]{8}$")
 
 
 # ── Confidence scoring ─────────────────────────────────────────────────────────
@@ -234,6 +247,28 @@ class SuggestionEngine:
         cvr    = float(row.get("conversion_rate") or 0)
         term   = row["search_term"].lower().strip()
         is_npi = any(term.startswith(pfx) for pfx in _NON_PURCHASE_PREFIXES)
+        is_asin = bool(_ASIN_RE.match(term))
+
+        # ── ASIN placements: product targets, not keywords ────────────────
+        # Match types (exact/phrase/broad) do not exist for product targets,
+        # so emit one suggestion per direction rather than three variants,
+        # and return before the keyword rules can fire.
+        if is_asin:
+            if cost > 5 and orders == 0:
+                conf = _confidence_negative(cost, sales, orders, clicks, acos, is_npi)
+                if self._make(row, profile_id, "negative_product_target", "negative",
+                              f"ASIN placement spent ${cost:.2f} with zero orders — "
+                              f"exclude as product target",
+                              conf):
+                    created += 1
+            if sales > 10 and acos is not None and acos < 0.30:
+                conf = _confidence_harvest(cost, sales, orders, clicks, acos, roas, cvr)
+                if self._make(row, profile_id, "product_target", "harvest",
+                              f"ASIN placement: ${sales:.2f} sales at ACOS "
+                              f"{acos*100:.1f}% — add as product target",
+                              conf):
+                    created += 1
+            return created
 
         # ── Negative rules ────────────────────────────────────────────────
         if cost > 5 and orders == 0:
