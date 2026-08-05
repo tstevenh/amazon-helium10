@@ -72,6 +72,17 @@ _TARGETING_METRICS = [
     "clickThroughRate", "costPerClick",
 ]
 
+# Search-term metrics — requested via reportTypeId spSearchTerm, groupBy searchTerm.
+# `searchTerm` is the actual customer query; `keyword` is the targeting term that
+# matched it. Our schema keys rows on (profile, ad_group, search_term, date), so
+# adGroupId and searchTerm are both mandatory.
+_SEARCH_TERM_METRICS = [
+    "date",  # must be requested explicitly — v3 does not auto-include it
+    "campaignId", "adGroupId", "searchTerm", "keyword", "matchType",
+    "impressions", "clicks", "cost", "purchases7d", "sales7d",
+    "unitsSoldClicks7d",
+]
+
 # Poll settings — see settings.amazon_report_poll_max_attempts /
 # amazon_report_poll_interval_sec. Read inside _poll_report so they can be
 # overridden per-environment and monkeypatched in tests.
@@ -107,8 +118,21 @@ def _request_report(
 ) -> str:
     """POST /reporting/reports and return reportId."""
     if group_by is None:
-        group_by = (["campaign"] if report_type == "spCampaigns" else
-                    ["adGroup"] if report_type == "spAdGroups" else ["targeting"])
+        # Explicit map rather than a trailing else — an unmapped report type
+        # silently defaulting to ["targeting"] produces a valid-looking report
+        # with the wrong grouping.
+        _DEFAULT_GROUP_BY = {
+            "spCampaigns": ["campaign"],
+            "spAdGroups": ["adGroup"],
+            "spTargeting": ["targeting"],
+            "spSearchTerm": ["searchTerm"],
+        }
+        if report_type not in _DEFAULT_GROUP_BY:
+            raise AmazonApiError(
+                f"No default groupBy for report type {report_type!r} — "
+                "pass group_by explicitly."
+            )
+        group_by = _DEFAULT_GROUP_BY[report_type]
     url = f"{_REPORTING_BASE}/reporting/reports"
     body = {
         "name": f"ppc-os-{report_type}-{start_date}-{end_date}",
@@ -500,4 +524,82 @@ def fetch_target_performance(
             "roas": round(sales / spend, 4) if spend else None,
         })
     logger.warning("[reporting] fetch_target_performance profile=%s rows=%d", profile_id, len(normalised))
+    return normalised
+
+
+# ---------------------------------------------------------------------------
+# Public API — search term performance
+# ---------------------------------------------------------------------------
+
+def fetch_search_term_performance(
+    access_token: str,
+    profile_id: int,
+    start_date: date,
+    end_date: date,
+    token_getter: Optional[Callable[[], str]] = None,
+) -> list[dict[str, Any]]:
+    """
+    Fetch SP search-term daily performance (the actual customer queries).
+
+    Report type spSearchTerm, groupBy searchTerm. `searchTerm` is the query a
+    shopper typed; `keyword` is the targeting term that matched it.
+
+    Rows are skipped when `searchTerm` or `adGroupId` is absent: our
+    search_terms table has search_term NOT NULL and a unique key of
+    (profile_id, ad_group_id, search_term, date), so such a row cannot be
+    placed.
+
+    Returns list of normalised dicts:
+      amazon_campaign_id, amazon_ad_group_id, search_term, keyword_text,
+      match_type, date, impressions, clicks, cost, sales, orders, units
+
+    Note this returns `cost` (not `spend`) and `units`, matching the
+    search_terms table's column names — unlike the campaign/ad-group/target
+    fetchers, whose destination tables use `spend`.
+
+    token_getter: optional callable that returns a fresh access token.
+    """
+    if settings.amazon_mock_mode:
+        # Mock search-term data is generated in the service layer from local
+        # campaign/ad-group rows, so there is nothing to fetch here.
+        logger.info("[reporting] MOCK: fetch_search_term_performance returns []")
+        return []
+
+    raw_rows = _fetch_report_chunked(
+        access_token, profile_id,
+        "spSearchTerm", _SEARCH_TERM_METRICS,
+        start_date, end_date,
+        group_by=["searchTerm"],
+        token_getter=token_getter,
+    )
+
+    normalised: list[dict[str, Any]] = []
+    skipped = 0
+    for r in raw_rows:
+        term = (r.get("searchTerm") or "").strip()
+        ag_id_raw = r.get("adGroupId")
+        if not term or not ag_id_raw:
+            skipped += 1
+            continue
+        clicks = _safe_int(r.get("clicks"))
+        impr = _safe_int(r.get("impressions"))
+        normalised.append({
+            "amazon_campaign_id": int(r["campaignId"]) if r.get("campaignId") else None,
+            "amazon_ad_group_id": int(ag_id_raw),
+            # Lowercased so aggregation does not split the same query on casing.
+            "search_term": term.lower()[:500],   # column is varchar(500)
+            "keyword_text": (r.get("keyword") or "").lower(),
+            "match_type": (r.get("matchType") or "").lower(),
+            "date": r.get("date"),
+            "impressions": impr,
+            "clicks": clicks,
+            "cost": _safe_decimal(r.get("cost")) or 0.0,
+            "sales": _safe_decimal(r.get("sales7d")) or 0.0,
+            "orders": _safe_int(r.get("purchases7d")),
+            "units": _safe_int(r.get("unitsSoldClicks7d")),
+        })
+    logger.warning(
+        "[reporting] fetch_search_term_performance profile=%s rows=%d skipped=%d",
+        profile_id, len(normalised), skipped,
+    )
     return normalised

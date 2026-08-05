@@ -34,3 +34,6 @@ class SearchTermSyncResponse(BaseModel):
     account_id: str
     terms_synced: int
     suggestions_generated: int
+    # Per-profile failures. Empty on full success. A non-empty list means the
+    # sync is partial — terms_synced is not the whole picture.
+    errors: list[str] = []

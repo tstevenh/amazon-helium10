@@ -76,6 +76,7 @@ def _do_sync(account_id: uuid.UUID, db: Session, user: User) -> dict:
     return {
         "terms_synced": result["terms_synced"],
         "suggestions_generated": total_sugg,
+        "errors": result.get("errors", []),
     }
 
 

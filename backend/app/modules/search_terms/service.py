@@ -4,17 +4,23 @@ import logging
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core import amazon_reporting
 from app.modules.accounts.models import AdsProfile, SellerAccount
 from app.modules.accounts.repository import AdsProfileRepository
+from app.modules.accounts.service import AccountService
 from app.modules.campaigns.models import AdGroup, Campaign
 from app.modules.search_terms.repository import SearchTermRepository
 
 logger = logging.getLogger(__name__)
+
+# Search-term reports are only needed for the rules/suggestions lookback
+# window (30 days), not the full performance history.
+_DEFAULT_LOOKBACK_DAYS = 30
 
 # ---------------------------------------------------------------------------
 # Mock search-term data per marketplace (country_code)
@@ -89,22 +95,104 @@ class SearchTermSyncService:
         self.db = db
         self.repo = SearchTermRepository(db)
         self.profile_repo = AdsProfileRepository(db)
+        self._account_svc = AccountService(db)
 
-    def sync_for_account(self, account: SellerAccount) -> dict:
-        """Sync search terms for all profiles of an account."""
+    def sync_for_account(self, account: SellerAccount, days: Optional[int] = None) -> dict:
+        """Sync search terms for all profiles of an account.
+
+        In real mode this pulls Amazon's spSearchTerm report per profile. In
+        mock mode it generates fixtures from the local campaign/ad-group rows.
+        """
         profiles = self.profile_repo.get_by_account(account.id)
+        lookback = days if days is not None else _DEFAULT_LOOKBACK_DAYS
         total = 0
+        errors: list[str] = []
+
         for profile in profiles:
-            total += self._sync_profile(profile)
+            try:
+                if settings.amazon_mock_mode:
+                    total += self._sync_profile_mock(profile)
+                else:
+                    total += self._sync_profile_real(account, profile, lookback)
+            except Exception as exc:
+                # Per Plan 1: a failure must be reported, never swallowed into
+                # a zero that looks like "this profile has no search terms".
+                msg = f"Search term sync failed for profile {profile.amazon_profile_id}: {exc}"
+                logger.error("[search_terms] %s", msg)
+                errors.append(msg)
+                self.db.rollback()
+
         self.db.commit()
-        return {"terms_synced": total}
+        return {"terms_synced": total, "errors": errors}
 
-    def _sync_profile(self, profile: AdsProfile) -> int:
+    # ── Real mode ─────────────────────────────────────────────────────────
+
+    def _sync_profile_real(
+        self, account: SellerAccount, profile: AdsProfile, days: int
+    ) -> int:
+        """Fetch Amazon's search-term report for one profile and upsert rows."""
+        end_date = date.today() - timedelta(days=1)   # yesterday: today is partial
+        start_date = end_date - timedelta(days=days - 1)
+
+        # Reports can take 30+ min per chunk, so refresh the token per chunk.
+        token_getter = lambda: self._account_svc.get_valid_access_token(account, force_refresh=True)
+        access_token = token_getter()
+
+        raw = amazon_reporting.fetch_search_term_performance(
+            access_token, profile.amazon_profile_id, start_date, end_date,
+            token_getter=token_getter,
+        )
+
+        # Amazon IDs -> local UUIDs. One query each, not one per row.
+        campaign_map = {
+            c.amazon_campaign_id: c.id
+            for c in self.db.query(Campaign)
+            .filter(Campaign.profile_id == profile.id, Campaign.deleted_at.is_(None))
+            .all()
+        }
+        ad_group_map = {
+            ag.amazon_ad_group_id: ag.id
+            for ag in self.db.query(AdGroup)
+            .join(Campaign, AdGroup.campaign_id == Campaign.id)
+            .filter(Campaign.profile_id == profile.id, AdGroup.deleted_at.is_(None))
+            .all()
+        }
+
+        total = 0
+        skipped = 0
+        for r in raw:
+            ad_group_id = ad_group_map.get(r["amazon_ad_group_id"])
+            if ad_group_id is None:
+                # Ad group not synced locally — the unique key needs it.
+                skipped += 1
+                continue
+            metrics = _compute_metrics(
+                r["clicks"], float(r["cost"]), float(r["sales"]), r["orders"], r["impressions"]
+            )
+            self.repo.upsert(dict(
+                profile_id=profile.id,
+                campaign_id=campaign_map.get(r.get("amazon_campaign_id")),
+                ad_group_id=ad_group_id,
+                search_term=r["search_term"],
+                date=r["date"],
+                impressions=r["impressions"],
+                clicks=r["clicks"],
+                orders=r["orders"],
+                units=r["units"],
+                **metrics,
+            ))
+            total += 1
+
+        logger.warning(
+            "[search_terms] profile %s: upserted %d terms, skipped %d (%s -> %s)",
+            profile.amazon_profile_id, total, skipped, start_date, end_date,
+        )
+        return total
+
+    # ── Mock mode ─────────────────────────────────────────────────────────
+
+    def _sync_profile_mock(self, profile: AdsProfile) -> int:
         """Generate and upsert mock search terms for one profile."""
-        if not settings.amazon_mock_mode:
-            logger.warning("Real Amazon Search Term API not implemented; skipping profile %s", profile.id)
-            return 0
-
         # Pick terms by country_code
         country = (profile.country_code or "US").upper()
         sync_date = date.today() - timedelta(days=1)
