@@ -98,7 +98,52 @@ weren't retrieved — and deleting them would destroy live campaign data.
 
 ---
 
-## ⚠️ The remaining gap: Search Terms is a mock-only stub
+## ✅ RESOLVED 2026-08-05: Search Terms now implemented
+
+The gap described below was **fixed and verified** after the first draft of
+these notes. `fetch_search_term_performance()` was added using report type
+`spSearchTerm` / `groupBy: ["searchTerm"]`, and `_sync_profile` was split into
+real and mock paths.
+
+Verified against the live account (30-day window, 15 min 26 s):
+
+```
+"terms_synced": 121, "suggestions_generated": 9, "errors": []
+```
+
+- 121 rows, 106 distinct search terms, 2026-07-06 → 2026-08-04
+- Real customer queries: `sobriety gifts for women`, `boss mug`,
+  `chief engineer cup`, `microbiology mug`, plus ASIN placements
+- **The suggestions engine ran automatically and produced 9 harvest
+  candidates** with real reasoning, e.g. *"Strong sales $14.99 with ACOS 3.0%
+  — add as Exact"*
+
+**All three previously blocked modules — Search Terms, Suggestions, Rules —
+are now operational.**
+
+A latent bug was fixed along the way: `_request_report` chose `groupBy` with a
+chained conditional ending in `else ["targeting"]`, so any unrecognised report
+type silently received the wrong grouping and would have returned a
+plausible-looking but incorrect report. It now raises on an unmapped type.
+
+### ⚠️ Follow-up: the harvest engine mishandles ASIN search terms
+
+7 of the 9 generated suggestions are ASINs (`b0fcs8jvp9`, `b07gn4jsx1`, …)
+recommended as `keyword_exact`. ASINs come from product-targeting placements,
+not text queries — **an ASIN cannot be added as an exact-match keyword in
+Amazon.** Those suggestions are not actionable.
+
+This is a pre-existing flaw in `suggestions/service.py`, not a regression. It
+was invisible until search terms populated. The fix is an ASIN-pattern check
+(`^b0[a-z0-9]{8}$`, case-insensitive) routing those terms to a product-target
+suggestion type instead of `keyword_exact`. Small, but it affects the majority
+of current suggestions.
+
+---
+
+## Original finding (now fixed — kept for context)
+
+### Search Terms was a mock-only stub
 
 `backend/app/modules/search_terms/service.py:104`
 
@@ -128,15 +173,15 @@ silently and permanently.
 
 ### Module status in real mode
 
-| Module | Status |
-|---|---|
-| Campaign Manager | ✅ working |
-| Ad Groups | ✅ working |
-| Keywords | ✅ working |
-| Dashboard | labelled "Soon" — not built |
-| **Search Terms** | ❌ **mock-only stub** |
-| **Suggestions** | ❌ blocked by Search Terms |
-| **Rules** | ❌ blocked by Search Terms |
+| Module | Status before 2026-08-05 | Status now |
+|---|---|---|
+| Campaign Manager | ✅ working | ✅ working |
+| Ad Groups | ✅ working | ✅ working |
+| Keywords | ✅ working | ✅ working |
+| Dashboard | labelled "Soon" | still not built |
+| **Search Terms** | ❌ mock-only stub | ✅ **working** |
+| **Suggestions** | ❌ blocked | ✅ **working** (see ASIN caveat) |
+| **Rules** | ❌ blocked | ✅ **unblocked** — has data to evaluate |
 
 ### How to fix it
 
@@ -226,7 +271,8 @@ Two things Plan 2 also fixes:
 
 1. **Review and merge `fix/sync-honesty`.** Plan 2's Task 4 deletes code from
    this repo, so review this first.
-2. **Implement the real Search Term report** (~1 day). Unblocks three modules.
+2. **Fix the ASIN harvest bug** (~1 hour). Small, and it affects most of the
+   suggestions the engine currently produces.
 3. **Plan 2** — background worker, job persistence, scheduler (3–5 days).
 4. **Then deploy to a VPS.** Pre-deployment hardening is Task 7 of Plan 2:
    bind ports to `127.0.0.1` (they are currently on `0.0.0.0` with the
