@@ -95,7 +95,8 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      # Loopback only — a reverse proxy terminates TLS in front of this.
+      - "127.0.0.1:8000:8000"
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -125,7 +126,8 @@ services:
     depends_on:
       - api
     ports:
-      - "3000:3000"
+      # Loopback only — a reverse proxy terminates TLS in front of this.
+      - "127.0.0.1:3000:3000"
     networks:
       - ppc_net
 
