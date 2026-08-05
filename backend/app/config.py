@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     amazon_report_poll_max_attempts: int = 1440   # 1440 x 10s = 4 hours
     amazon_report_poll_interval_sec: int = 10
 
+    # Background worker (Celery + Redis)
+    redis_url: str = "redis://redis:6379/0"
+    # Periodic full sync interval. 0 disables the schedule entirely.
+    sync_schedule_hours: int = 6
+
     # Performance sync: how many days of history to pull on first sync.
     # Subsequent syncs (already-synced profiles) use a 3-day rolling window.
     # Amazon Ads Reporting API typically supports up to 2 years (730 days).
