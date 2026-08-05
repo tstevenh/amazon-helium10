@@ -2,7 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move Amazon syncing out of the HTTP request into a Celery worker with job state persisted in the existing `sync_jobs` table, so a 2-hour sync can be triggered from the UI and watched to completion.
+**Goal:** Move Amazon syncing out of the HTTP request into a Celery worker with job state persisted in the existing `sync_jobs` table — so a 2-hour sync can be triggered from the UI and watched to completion — and reach internal-production readiness: scheduled, monitored, backed up, hardened.
+
+**Scope note (revised 2026-08-05):** Tasks 8–10 were added after Plan 1's
+verification. Task 8 in particular is not optional: introducing a scheduler
+without failure alerting recreates the original disaster in a new shape —
+syncs failing silently at 3am, discovered weeks later. Plan 1 made failures
+*visible*; something must actually *look*.
 
 **Architecture:** A Redis service is added to Docker Compose as a Celery broker and result backend. A new `worker` container runs Celery with the prefork pool — chosen over ARQ because the codebase uses synchronous SQLAlchemy/psycopg2, and prefork runs that natively without async bridging. `POST /sync-all` enqueues a task and returns `202` immediately with a job id. The worker writes progress to `sync_jobs`, and the existing `GET /sync-status` endpoint reads from that table instead of the in-memory `_sync_jobs` dict. Celery Beat provides periodic syncs.
 
@@ -1365,29 +1371,650 @@ account afterwards. Sequence:
    idempotent and will not overwrite existing users, so change those
    passwords through the app or with a one-off script.
 
-- [ ] **Step 4: Write the deployment notes**
+- [ ] **Step 4: Implement backups (not just document them)**
+
+Create `scripts/backup-db.sh`. Consolidating onto one server removes the
+accidental redundancy of every teammate holding their own copy, so this is
+required, not optional.
+
+```bash
+#!/bin/sh
+# Nightly Postgres dump. Keeps 14 days. Run from the compose project root.
+set -eu
+
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/ppc-os}"
+STAMP=$(date +%Y%m%d-%H%M%S)
+mkdir -p "$BACKUP_DIR"
+
+docker compose exec -T postgres pg_dump -U "${POSTGRES_USER:-ppc_os}" \
+  -d "${POSTGRES_DB:-ppc_os}" --format=custom \
+  > "$BACKUP_DIR/ppc-os-$STAMP.dump"
+
+# Fail loudly if the dump is suspiciously small (empty dumps are worse than none).
+SIZE=$(wc -c < "$BACKUP_DIR/ppc-os-$STAMP.dump")
+if [ "$SIZE" -lt 10000 ]; then
+  echo "ERROR: dump is only ${SIZE} bytes — check the database" >&2
+  exit 1
+fi
+
+find "$BACKUP_DIR" -name 'ppc-os-*.dump' -mtime +14 -delete
+echo "backup ok: $BACKUP_DIR/ppc-os-$STAMP.dump (${SIZE} bytes)"
+```
+
+Make it executable, run it once, and **verify the dump restores** — an
+untested backup is not a backup:
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && chmod +x scripts/backup-db.sh && BACKUP_DIR=/tmp/ppc-backup-test ./scripts/backup-db.sh && docker compose exec -T postgres psql -U ppc_os -d postgres -c "CREATE DATABASE restore_test;" && docker compose exec -T postgres pg_restore -U ppc_os -d restore_test --no-owner < "$(ls -t /tmp/ppc-backup-test/*.dump | head -1)" && docker compose exec -T postgres psql -U ppc_os -d restore_test -c "SELECT count(*) FROM targets;" && docker compose exec -T postgres psql -U ppc_os -d postgres -c "DROP DATABASE restore_test;"
+```
+
+Expected: the restored `targets` count matches production (231,798).
+
+Install the cron entry on the VPS (not on the laptop):
+
+```
+0 3 * * * cd /opt/ppc-os && ./scripts/backup-db.sh >> /var/log/ppc-os-backup.log 2>&1
+```
+
+- [ ] **Step 5: Write the deployment notes**
 
 Create `docs/DEPLOYMENT.md` covering: the reverse proxy and TLS
 requirement, that `AMAZON_REDIRECT_URI` must become
 `https://<domain>/accounts/oauth/callback` **and** be re-registered in the
-Amazon LWA app, the secret-rotation order above, and a `pg_dump` cron
-example. Include the warning that `docker compose down -v` destroys the
+Amazon LWA app, the secret-rotation order above, the backup cron and its
+restore test, and the warning that `docker compose down -v` destroys the
 database volume.
 
-- [ ] **Step 5: Verify everything still runs after hardening**
+- [ ] **Step 6: Verify everything still runs after hardening**
 
 ```bash
 cd /Users/tsth/Downloads/helium/ppc-os && docker compose down && docker compose up -d --build && sleep 40 && docker compose ps && curl -s http://localhost:8000/health && docker compose exec -T api python -m pytest tests -q | tail -3
 ```
 
-Expected: all services up, health OK, 37 tests passing.
+Expected: all services up, health OK, all tests passing.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add docker-compose.yml frontend/Dockerfile .env.example docs/DEPLOYMENT.md
-git commit -m "chore: harden for deployment — localhost binding, prod frontend build, docs"
+git add docker-compose.yml frontend/Dockerfile .env.example docs/DEPLOYMENT.md scripts/backup-db.sh
+git commit -m "chore: harden for deployment — localhost binding, prod frontend build, backups"
 ```
+
+---
+
+### Task 8: Sync failure alerting and staleness visibility
+
+**Not optional.** Tasks 1–6 introduce automatic syncing. Without this task, a
+scheduled sync that fails at 3am is discovered when somebody eventually
+notices the numbers look wrong — which is exactly how the original month was
+lost. Plan 1 made failures visible; this makes something look.
+
+**Files:**
+- Create: `backend/app/worker/health.py`
+- Create: `backend/tests/worker/test_health.py`
+- Modify: `backend/app/config.py`, `backend/app/worker/celery_app.py`, `backend/app/main.py`, `.env.example`
+
+**Interfaces:**
+- Consumes: `SyncJob` / `SyncJobRepository` (Task 2), `build_beat_schedule` (Task 6)
+- Produces:
+  ```python
+  def collect_sync_health(db: Session, stale_after_hours: int) -> dict
+      # {"failed_recent": [...], "stale_accounts": [...], "healthy": bool}
+
+  @celery_app.task(name="check_sync_health")
+  def check_sync_health() -> dict      # Beat-driven; alerts on problems
+
+  GET /health/sync                     # unauthenticated, for uptime monitors
+  ```
+  New settings: `alert_webhook_url: str = ""`, `sync_stale_after_hours: int = 24`,
+  `health_check_interval_minutes: int = 30`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `backend/tests/worker/test_health.py`:
+
+```python
+"""Sync failures must be actively surfaced, not merely recorded."""
+import inspect
+
+from app.config import settings
+from app.worker import health
+
+
+def test_collect_sync_health_exists():
+    assert hasattr(health, "collect_sync_health")
+
+
+def test_health_reports_both_failures_and_staleness():
+    """A sync that never runs is as bad as one that fails loudly."""
+    src = inspect.getsource(health.collect_sync_health)
+    assert "failed" in src
+    assert "stale" in src
+
+
+def test_alerting_is_a_no_op_when_no_webhook_configured():
+    """Absent config must not crash the scheduler — log and continue."""
+    assert hasattr(settings, "alert_webhook_url")
+    assert settings.alert_webhook_url == "" or isinstance(settings.alert_webhook_url, str)
+    assert health.send_alert("test message") is False  # no webhook -> False
+
+
+def test_healthy_result_sends_no_alert():
+    """Do not train the team to ignore the alert channel."""
+    src = inspect.getsource(health.check_sync_health)
+    assert "healthy" in src, "must only alert when something is actually wrong"
+
+
+def test_health_task_is_registered():
+    assert health.check_sync_health.name == "check_sync_health"
+
+
+def test_stale_threshold_is_configurable():
+    assert settings.sync_stale_after_hours >= 1
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T api python -m pytest tests/worker/test_health.py -q
+```
+
+Expected: `ModuleNotFoundError: No module named 'app.worker.health'`.
+
+- [ ] **Step 3: Add the settings**
+
+In `backend/app/config.py`, after the worker settings:
+
+```python
+    # Failure alerting. POSTs JSON to this URL (Slack/Discord/n8n webhook).
+    # Empty disables alerting — send_alert() logs at ERROR and returns False.
+    alert_webhook_url: str = ""
+    # An account with no successful sync in this many hours is "stale".
+    sync_stale_after_hours: int = 24
+    health_check_interval_minutes: int = 30
+```
+
+- [ ] **Step 4: Create the health module**
+
+Create `backend/app/worker/health.py`:
+
+```python
+"""Sync health checks and failure alerting.
+
+Introducing a scheduler without this recreates the original failure mode:
+syncs failing invisibly and being discovered weeks later. Two conditions are
+watched — jobs that failed, and accounts that have not succeeded recently.
+A sync that silently never runs is as damaging as one that errors.
+"""
+import logging
+from datetime import datetime, timedelta, timezone as tz
+
+import requests
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.database import SessionLocal
+from app.modules.accounts.models import Credential, SellerAccount
+from app.modules.sync_jobs.models import SyncJob
+from app.modules.sync_jobs.repository import JOB_STATUS_COMPLETED, JOB_STATUS_FAILED
+from app.worker.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
+
+
+def send_alert(message: str) -> bool:
+    """POST an alert to the configured webhook.
+
+    Returns True if delivered. When no webhook is configured this logs at
+    ERROR and returns False — a missing alert channel must never crash the
+    scheduler, but it must also never look like success.
+    """
+    if not settings.alert_webhook_url:
+        logger.error("[health] ALERT (no webhook configured): %s", message)
+        return False
+    try:
+        resp = requests.post(
+            settings.alert_webhook_url,
+            json={"text": message},
+            timeout=15,
+        )
+        if not resp.ok:
+            logger.error("[health] alert webhook returned HTTP %d", resp.status_code)
+            return False
+        return True
+    except Exception as exc:
+        logger.error("[health] alert webhook failed: %s", exc)
+        return False
+
+
+def collect_sync_health(db: Session, stale_after_hours: int) -> dict:
+    """Return failed jobs and stale accounts. Pure read, no side effects."""
+    now = datetime.now(tz.utc)
+    since = now - timedelta(hours=24)
+    stale_cutoff = now - timedelta(hours=stale_after_hours)
+
+    failed_recent = [
+        {
+            "job_id": str(j.id),
+            "account_id": str(j.seller_account_id),
+            "error": (j.error_message or "")[:300],
+            "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+        }
+        for j in db.query(SyncJob)
+        .filter(SyncJob.status == JOB_STATUS_FAILED, SyncJob.created_at >= since)
+        .order_by(SyncJob.created_at.desc())
+        .all()
+    ]
+
+    stale_accounts = []
+    connected = (
+        db.query(SellerAccount)
+        .join(Credential, Credential.seller_account_id == SellerAccount.id)
+        .all()
+    )
+    for account in connected:
+        last_ok = (
+            db.query(SyncJob)
+            .filter(
+                SyncJob.seller_account_id == account.id,
+                SyncJob.status == JOB_STATUS_COMPLETED,
+            )
+            .order_by(SyncJob.finished_at.desc())
+            .first()
+        )
+        if last_ok is None or last_ok.finished_at is None or last_ok.finished_at < stale_cutoff:
+            stale_accounts.append({
+                "account_id": str(account.id),
+                "name": account.name,
+                "last_success": last_ok.finished_at.isoformat()
+                if last_ok and last_ok.finished_at else None,
+            })
+
+    return {
+        "failed_recent": failed_recent,
+        "stale_accounts": stale_accounts,
+        "healthy": not failed_recent and not stale_accounts,
+        "checked_at": now.isoformat(),
+    }
+
+
+@celery_app.task(name="check_sync_health")
+def check_sync_health() -> dict:
+    """Beat-driven health check. Alerts only when something is wrong."""
+    db = SessionLocal()
+    try:
+        result = collect_sync_health(db, settings.sync_stale_after_hours)
+        if result["healthy"]:
+            logger.info("[health] sync health OK")
+            return result
+
+        # Only alert on real problems — a noisy channel gets ignored.
+        lines = ["PPC OS sync health problem:"]
+        for f in result["failed_recent"]:
+            lines.append(f"  FAILED account={f['account_id']}: {f['error']}")
+        for s in result["stale_accounts"]:
+            lines.append(
+                f"  STALE account={s['name']} last_success={s['last_success']}"
+            )
+        send_alert("\n".join(lines))
+        return result
+    finally:
+        db.close()
+```
+
+- [ ] **Step 5: Schedule it and expose the endpoint**
+
+In `backend/app/worker/celery_app.py`, add `"app.worker.health"` to the
+`include` list, and extend `build_beat_schedule`:
+
+```python
+def build_beat_schedule(hours: int) -> dict:
+    schedule = {}
+    if hours > 0:
+        schedule["enqueue-scheduled-syncs"] = {
+            "task": "enqueue_scheduled_syncs",
+            "schedule": float(hours * 60 * 60),
+        }
+    # The health check runs regardless of whether periodic sync is enabled —
+    # a manually-triggered sync can fail just as silently.
+    schedule["check-sync-health"] = {
+        "task": "check_sync_health",
+        "schedule": float(settings.health_check_interval_minutes * 60),
+    }
+    return schedule
+```
+
+Note this changes the Task 6 test `build_beat_schedule(0) == {}`. Update it:
+
+```python
+def test_schedule_can_be_disabled():
+    from app.worker.celery_app import build_beat_schedule
+
+    # Disabling periodic sync must not disable health checking.
+    assert "enqueue-scheduled-syncs" not in build_beat_schedule(0)
+    assert "check-sync-health" in build_beat_schedule(0)
+    assert "enqueue-scheduled-syncs" in build_beat_schedule(6)
+```
+
+In `backend/app/main.py`, add an unauthenticated endpoint so an uptime
+monitor can watch staleness without credentials. It exposes no ad data —
+only account ids, names and timestamps:
+
+```python
+@app.get("/health/sync")
+def health_sync() -> dict:
+    """Sync freshness for uptime monitors. Returns 200 always; read `healthy`."""
+    from app.database import SessionLocal
+    from app.worker.health import collect_sync_health
+
+    db = SessionLocal()
+    try:
+        return collect_sync_health(db, settings.sync_stale_after_hours)
+    finally:
+        db.close()
+```
+
+- [ ] **Step 6: Document the setting**
+
+Append to `.env.example`:
+
+```
+# Webhook for sync failure alerts (Slack/Discord/n8n). Empty = log only.
+ALERT_WEBHOOK_URL=
+SYNC_STALE_AFTER_HOURS=24
+HEALTH_CHECK_INTERVAL_MINUTES=30
+```
+
+- [ ] **Step 7: Verify it detects a real problem**
+
+Tests first, then prove it actually fires:
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T api python -m pytest tests -q | tail -3 && curl -s http://localhost:8000/health/sync | python3 -m json.tool
+```
+
+Expected: `/health/sync` reports the connected account as **stale** (no
+completed job yet, since job persistence is new) and `healthy: false`. That
+is the check working — it should not report healthy when nothing has ever
+successfully synced.
+
+Then confirm a failure is caught:
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T api python -c "
+from app.worker.health import check_sync_health
+import json; print(json.dumps(check_sync_health.apply().get(), indent=2)[:800])
+"
+```
+
+Expected: a non-healthy result, and an `[health] ALERT (no webhook configured)`
+line in the logs — confirming the alert path runs.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add backend/app/worker/health.py backend/app/worker/celery_app.py backend/app/main.py backend/app/config.py backend/tests/worker/ .env.example
+git commit -m "feat: sync failure alerting and staleness health endpoint"
+```
+
+---
+
+### Task 9: ASIN-aware suggestions
+
+Verified 2026-08-05: **7 of 9 generated suggestions recommend adding an ASIN
+as an exact-match keyword.** ASINs come from product-targeting placements, not
+text queries, and Amazon will not accept them as keywords. Those suggestions
+are not actionable, so most of the module's current output is noise.
+
+Pre-existing flaw, invisible until search terms populated in Plan 1.
+
+**Files:**
+- Modify: `backend/app/modules/suggestions/service.py`
+- Test: `backend/tests/modules/test_suggestion_asin.py`
+
+**Interfaces:**
+- Consumes: nothing new
+- Produces: two new `suggestion_type` values — `product_target` and
+  `negative_product_target`. The column is `varchar(50)` with **no** check
+  constraint (verified), so no migration is needed.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `backend/tests/modules/test_suggestion_asin.py`:
+
+```python
+"""ASIN search terms must become product targets, never keywords."""
+import inspect
+
+from app.modules.suggestions import service as sugg_service
+
+
+def test_asin_pattern_exists():
+    assert hasattr(sugg_service, "_ASIN_RE")
+
+
+def test_asin_pattern_matches_real_asins():
+    """Observed in live data 2026-08-05."""
+    for asin in ("b0fcs8jvp9", "b07gn4jsx1", "b097grrmqy", "b084rlx76q",
+                 "b09v4n316j", "b0dt4c83qg", "b0fhwph8fq"):
+        assert sugg_service._ASIN_RE.match(asin), f"{asin} should match"
+
+
+def test_asin_pattern_does_not_match_real_queries():
+    """False positives would silently drop legitimate keyword suggestions."""
+    for term in ("boss mug", "sobriety gifts for women", "bluebottle",
+                 "microbiology mug", "chief engineer cup", "b0"):
+        assert not sugg_service._ASIN_RE.match(term), f"{term} must not match"
+
+
+def test_evaluate_routes_asins_to_product_target():
+    src = inspect.getsource(sugg_service.SuggestionEngine._evaluate)
+    assert "_ASIN_RE" in src, "_evaluate must branch on ASIN terms"
+    assert "product_target" in src
+
+
+def test_asin_terms_never_produce_keyword_suggestions():
+    """The specific bug: keyword_exact for an ASIN is not actionable."""
+    src = inspect.getsource(sugg_service.SuggestionEngine._evaluate)
+    asin_branch = src[src.index("_ASIN_RE"):]
+    # Within the ASIN branch, no keyword_* suggestion may be emitted.
+    for bad in ("keyword_exact", "keyword_phrase", "keyword_broad"):
+        idx = asin_branch.find(bad)
+        assert idx == -1 or "is_asin" not in asin_branch[:idx], (
+            f"{bad} must not be emitted for ASIN terms"
+        )
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T api python -m pytest tests/modules/test_suggestion_asin.py -q
+```
+
+Expected: `AttributeError: module ... has no attribute '_ASIN_RE'`.
+
+- [ ] **Step 3: Add the pattern**
+
+At the top of `backend/app/modules/suggestions/service.py`, after the imports:
+
+```python
+import re
+
+# Amazon ASINs in search-term reports are 10 characters beginning "B0"
+# (lowercased by the search-term fetcher). Requiring the "0" avoids false
+# positives on real 10-letter queries such as "bluebottle".
+#
+# Limitation: book ASINs are ISBN-derived and do not start with B0. Those
+# would still be treated as keyword terms. Acceptable — this account sells
+# drinkware and gifts, not books.
+_ASIN_RE = re.compile(r"^b0[a-z0-9]{8}$")
+```
+
+- [ ] **Step 4: Branch `_evaluate` on ASIN terms**
+
+In `_evaluate`, immediately after `term` is computed (it is already
+lowercased and stripped), add:
+
+```python
+        is_asin = bool(_ASIN_RE.match(term))
+```
+
+Then wrap the rule blocks. ASINs get product-target suggestions; match types
+(exact/phrase/broad) are meaningless for them, so emit **one** suggestion per
+direction rather than three variants:
+
+```python
+        if is_asin:
+            # ── ASIN placements: product targets, not keywords ────────────
+            if cost > 5 and orders == 0:
+                conf = _confidence_negative(cost, sales, orders, clicks, acos, is_npi)
+                if self._make(row, profile_id, "negative_product_target", "negative",
+                              f"ASIN placement spent ${cost:.2f} with zero orders — exclude as product target",
+                              conf):
+                    created += 1
+            if sales > 10 and acos is not None and acos < 0.30:
+                conf = _confidence_harvest(cost, sales, orders, clicks, acos, roas, cvr)
+                if self._make(row, profile_id, "product_target", "harvest",
+                              f"ASIN placement: ${sales:.2f} sales at ACOS {acos*100:.1f}% — add as product target",
+                              conf):
+                    created += 1
+            return created
+```
+
+Placing this before the keyword rules and returning early keeps the existing
+keyword logic completely untouched for text queries.
+
+- [ ] **Step 5: Run the tests**
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T api python -m pytest tests -q | tail -3
+```
+
+- [ ] **Step 6: Regenerate suggestions against live data and confirm**
+
+Clear the stale suggestions and regenerate from the search terms already in
+the database — no Amazon call needed, so this is fast.
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T postgres psql -U ppc_os -d ppc_os -c "DELETE FROM suggestions;" && docker compose restart api && sleep 14 && TOKEN=$(ADMIN_EMAIL=$(grep -E '^SEED_ADMIN_EMAIL=' .env | cut -d= -f2-); ADMIN_PW=$(grep -E '^SEED_ADMIN_PASSWORD=' .env | cut -d= -f2-); curl -s -X POST http://localhost:8000/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PW\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])") && curl -s -X POST "http://localhost:8000/suggestions/generate" -H "Authorization: Bearer $TOKEN" | head -c 300
+```
+
+Then inspect:
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T postgres psql -U ppc_os -d ppc_os -c "SELECT suggestion_type, count(*) FROM suggestions GROUP BY suggestion_type ORDER BY 2 DESC;"
+```
+
+Expected: the ASIN terms now appear as `product_target`, and **zero**
+`keyword_exact` rows whose `search_term` matches the ASIN pattern. Verify
+directly:
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T postgres psql -U ppc_os -d ppc_os -c "SELECT count(*) AS bad_rows FROM suggestions WHERE suggestion_type LIKE 'keyword%' AND search_term ~ '^b0[a-z0-9]{8}$';"
+```
+
+Expected: `bad_rows = 0`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/app/modules/suggestions/service.py backend/tests/modules/test_suggestion_asin.py
+git commit -m "fix: route ASIN search terms to product targets, not keywords"
+```
+
+---
+
+### Task 10: Verify the rules engine actually executes
+
+The rules engine was unblocked by Plan 1 (it now has search-term data) but
+**has never been run**. It shares the code path the suggestions engine
+exercised successfully, so this is verification, not repair — but "shares a
+code path" is not evidence.
+
+**Files:**
+- Create: `backend/tests/modules/test_rules_execution.py`
+- Modify: only if verification uncovers a defect
+
+**Interfaces:**
+- Consumes: `RuleService.execute` (`rules/service.py:141`)
+- Produces: no new interface
+
+- [ ] **Step 1: Confirm the rule schema and create a rule via the API**
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && grep -n "class RuleCreate" -A 20 backend/app/modules/rules/schemas.py
+```
+
+Build a rule matching the shape that `execute()` reads — `configuration_json`
+with `conditions`, `logic`, `lookback_days`, `suggestion_type`, `action`
+(see `rules/service.py:152-158`). Create it with the real profile id:
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && PROFILE=$(docker compose exec -T postgres psql -U ppc_os -d ppc_os -tAc "SELECT id FROM ads_profiles WHERE country_code='US';" | tr -d ' \r') && TOKEN=$(ADMIN_EMAIL=$(grep -E '^SEED_ADMIN_EMAIL=' .env | cut -d= -f2-); ADMIN_PW=$(grep -E '^SEED_ADMIN_PASSWORD=' .env | cut -d= -f2-); curl -s -X POST http://localhost:8000/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PW\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])") && curl -s -X POST http://localhost:8000/rules -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"name\":\"Zero-order spend\",\"profile_id\":\"$PROFILE\",\"configuration_json\":{\"conditions\":[{\"metric\":\"cost\",\"op\":\">\",\"value\":1},{\"metric\":\"orders\",\"op\":\"==\",\"value\":0}],\"logic\":\"AND\",\"lookback_days\":30,\"suggestion_type\":\"negative_exact\",\"action\":\"suggest\"}}" | python3 -m json.tool
+```
+
+If the payload is rejected, read the validation error and correct the fields
+to match `RuleCreate` — do not guess repeatedly.
+
+- [ ] **Step 2: Execute the rule and confirm it evaluated real rows**
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && RULE=$(docker compose exec -T postgres psql -U ppc_os -d ppc_os -tAc "SELECT id FROM rules ORDER BY created_at DESC LIMIT 1;" | tr -d ' \r') && TOKEN=$(cat /dev/null; ADMIN_EMAIL=$(grep -E '^SEED_ADMIN_EMAIL=' .env | cut -d= -f2-); ADMIN_PW=$(grep -E '^SEED_ADMIN_PASSWORD=' .env | cut -d= -f2-); curl -s -X POST http://localhost:8000/auth/login -H 'Content-Type: application/json' -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PW\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])") && curl -s -X POST "http://localhost:8000/rules/$RULE/execute" -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+**Success criterion: `rows_evaluated > 0`.** That proves the engine read real
+search-term data. `suggestions_generated` may legitimately be 0 if no row
+matches the conditions — the failure signal is `rows_evaluated == 0`, which
+would mean it is still reading nothing.
+
+- [ ] **Step 3: Confirm the execution was recorded**
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T postgres psql -U ppc_os -d ppc_os -c "SELECT rows_evaluated, suggestions_generated, status FROM rule_executions ORDER BY id DESC LIMIT 3;" 2>&1 | head
+```
+
+Expected: a completed row with a non-zero `rows_evaluated`.
+
+- [ ] **Step 4: Write a regression test pinning the contract**
+
+Create `backend/tests/modules/test_rules_execution.py`:
+
+```python
+"""The rules engine must read search terms and never touch Amazon."""
+import inspect
+
+from app.modules.rules import service as rules_service
+
+
+def test_execute_reads_search_terms():
+    src = inspect.getsource(rules_service.RuleService.execute)
+    assert "get_aggregated_by_term" in src
+
+
+def test_execute_records_an_execution_row():
+    """A rule run must leave an audit trail even when it matches nothing."""
+    src = inspect.getsource(rules_service.RuleService.execute)
+    assert "exec_repo.create" in src
+    assert "complete" in src
+
+
+def test_rules_never_import_the_amazon_client():
+    """Team constraint: 'Rules never apply Amazon changes.'"""
+    src = inspect.getsource(rules_service)
+    assert "amazon_ads" not in src
+    assert "amazon_reporting" not in src
+```
+
+- [ ] **Step 5: Run the suite and commit**
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T api python -m pytest tests -q | tail -3
+git add backend/tests/modules/test_rules_execution.py
+git commit -m "test: pin rules engine contract; verified executing on real data"
+```
+
+If Step 2 reveals a defect, **stop and re-plan** rather than patching
+opportunistically — a broken rules engine is its own task.
 
 ---
 
@@ -1395,8 +2022,21 @@ git commit -m "chore: harden for deployment — localhost binding, prod frontend
 
 **Spec coverage.** Worker process → Tasks 1, 3. `sync_jobs` wiring and
 deletion of the in-memory dict → Tasks 2, 4. UI status → Task 5.
-Scheduler → Task 6. Pre-VPS hardening → Task 7. Bugs 5, 6 and 7 from the
-original diagnosis are all addressed.
+Scheduler → Task 6. Pre-VPS hardening and backups → Task 7. Failure alerting
+and staleness → Task 8. ASIN suggestions → Task 9. Rules verification →
+Task 10. Bugs 5, 6 and 7 from the original diagnosis are all addressed, plus
+the four items identified as remaining gaps after Plan 1.
+
+**Ordering.** Tasks 1–4 are strictly sequential. Task 5 depends on Task 4.
+Task 6 depends on Tasks 2–3. **Task 8 depends on Task 6** and must not be
+deferred past it — a scheduler without alerting is the original bug in new
+clothing. Tasks 7, 9 and 10 are independent of the worker chain and can be
+done at any point; Task 7 must be done before any deployment.
+
+**Task 6 test amended by Task 8.** `build_beat_schedule(0)` no longer returns
+`{}` — health checking runs even when periodic sync is disabled. Task 8
+Step 5 gives the replacement assertion. This is a deliberate contract change,
+called out rather than left to fail confusingly.
 
 **Placeholders.** None. Task 5 is genuinely conditional — it verifies an
 existing implementation and may correctly change nothing; that is stated
@@ -1433,8 +2073,26 @@ Deliberately excluded — these are product decisions, not repairs:
 
 - Pushing changes back to Amazon (bid updates, pausing, negative keywords).
   The team's constraint is explicit: *"No write operations to Amazon Ads.
-  Read-only only."* Adtomic does this; PPC OS does not, by design.
-- Verifying the `orders` / `sales` columns, which were zero across every row
-  in Plan 1's verification. Needs a 30-90 day pull compared against the
-  Amazon Ads console — a data-validation task, not an engineering one.
+  Read-only only."* Adtomic does this; PPC OS does not, by design. **This is
+  the largest functional gap versus the tool it replaces**, and it is a
+  product decision, not an oversight.
+- The Dashboard module, still a "Soon" label in the sidebar.
 - Multi-tenancy, user management UI, dayparting, keyword intelligence.
+- Test coverage beyond the sync layer and the contracts pinned here. Auth and
+  the API endpoints have no tests.
+- A staging environment. Changes would go straight to production.
+- Redundancy. One VPS, one database, no failover.
+
+**Resolved since the first draft:** the `orders` / `sales` columns were
+verified working on 2026-08-05 — a 30-day pull returned 9 orders and $152.05
+sales with ACOS of 21.5% and 55.1%. The earlier zeros were a genuine
+reflection of a 2-day window containing one click.
+
+## Definition of done
+
+After Tasks 1–10 the app is **internal-production ready**: a teammate logs in,
+clicks Sync, watches it progress, and the data refreshes itself every 6 hours
+on a server with TLS, backups that have been restore-tested, and an alert when
+something breaks.
+
+It is **not** a sellable product — see "Not in this plan" above.
