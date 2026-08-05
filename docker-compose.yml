@@ -54,6 +54,26 @@ services:
     networks:
       - ppc_net
 
+  beat:
+    build:
+      context: ./backend
+    entrypoint: []
+    # Beat only schedules; it never executes tasks. Keeping it separate from
+    # the worker means restarting a worker cannot drop the schedule.
+    command: ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=info"]
+    volumes:
+      - ./backend/app:/app/app
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ppc_net
+
   api:
     build:
       context: ./backend

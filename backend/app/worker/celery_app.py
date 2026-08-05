@@ -22,7 +22,7 @@ celery_app = Celery(
     "ppc_os",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.worker.tasks"],
+    include=["app.worker.tasks", "app.worker.schedule"],
 )
 
 celery_app.conf.update(
@@ -40,6 +40,23 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
 )
+
+
+def build_beat_schedule(hours: int) -> dict:
+    """Return the Beat schedule, or omit periodic sync when disabled.
+
+    Kept as a function so the disabled case is directly testable.
+    """
+    schedule: dict = {}
+    if hours > 0:
+        schedule["enqueue-scheduled-syncs"] = {
+            "task": "enqueue_scheduled_syncs",
+            "schedule": float(hours * 60 * 60),
+        }
+    return schedule
+
+
+celery_app.conf.beat_schedule = build_beat_schedule(settings.sync_schedule_hours)
 
 
 @celery_app.task(name="ping")
