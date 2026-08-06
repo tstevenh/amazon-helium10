@@ -174,9 +174,11 @@ export const api = {
       `/accounts/${accountId}/targets/sync`,
     ),
 
-  syncAll: (accountId: string) =>
+  /** Full sync. perfDays omitted = routine 3-day rolling window (90 days
+   *  automatically on a profile's first sync). 90 is a slow backfill. */
+  syncAll: (accountId: string, perfDays?: number) =>
     syncRequest<SyncAllResponse>(
-      `/accounts/${accountId}/sync-all`,
+      `/accounts/${accountId}/sync-all` + (perfDays ? `?perf_days=${perfDays}` : ''),
     ),
 
   // ── Campaigns ────────────────────────────────────────────────────────────

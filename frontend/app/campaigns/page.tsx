@@ -151,6 +151,22 @@ export default function CampaignsPage() {
     },
   ]
 
+  // Totals for the rows currently shown. Derived from `filtered` rather than
+  // fetched separately, so the strip can never disagree with the table.
+  const kpis = useMemo(() => {
+    const sum = (pick: (r: typeof filtered[number]) => number | null | undefined) =>
+      filtered.reduce((acc, r) => acc + (Number(pick(r)) || 0), 0)
+    const spend  = sum(r => r.spend)
+    const sales  = sum(r => r.sales)
+    const clicks = sum(r => r.clicks)
+    const orders = sum(r => r.orders)
+    return {
+      spend, sales, clicks, orders,
+      acos: sales > 0 ? (spend / sales) * 100 : null,
+      roas: spend > 0 ? sales / spend : null,
+    }
+  }, [filtered])
+
   const columns: Column<CampaignWithMetrics>[] = [
     {
       header: 'Campaign',
