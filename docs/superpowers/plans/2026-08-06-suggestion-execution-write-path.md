@@ -18,6 +18,10 @@ From the merged spec (`PPC_OS_Merged.docx`), which supersedes all prior versions
 - `suggestion_actions` is **append-only** — "never delete or update. Stores literal Amazon API request/response for every execution attempt."
 - "Auditability from day 1 — every automated and manual change is logged with who/what/when/old→new before any automation goes live."
 - Two roles only: Admin, User.
+- **The write client is limited to three endpoints** — keyword bid, target
+  bid, negative keyword. It must NOT gain campaign, ad group or product ad
+  creation: the team's test campaign is created by a human in Amazon's
+  console, so the code's write surface stays minimal and auditable.
 - Do NOT modify historical migrations. Alembic head is `013`; this plan adds `014`.
 
 ## Hard safety rule for this plan
@@ -785,37 +789,78 @@ it; the kill-switch stays off.
 
 When authorised:
 
-- [ ] **Step 1: Agree the exact target in writing**
+**Team constraint (2026-08-06, relayed from the client's team):**
 
-Record here before touching anything: account, profile, campaign, keyword id,
-current bid, intended bid, and who approved. Prefer a **paused** campaign —
-it serves no impressions, so a wrong bid costs nothing.
+> *"If you want to test the API, never test on existing campaign, create 1 new
+> campaign for test. Don't use existing."*
 
-- [ ] **Step 2: Capture the current value from Amazon, not from our database**
+This is binding. The test target must be a **purpose-built new campaign**,
+never a real one.
+
+**Note on who creates it.** Creating a campaign is itself a write, requiring
+`POST /sp/campaigns`, `/sp/adGroups`, `/sp/productAds` and `/sp/keywords` —
+four write endpoints beyond the three this plan builds. Building campaign
+creation just to test a bid change would enlarge the write surface far beyond
+the thing under test. **A human creates the campaign in Amazon's console**;
+the app only ever changes a bid on it. That satisfies the constraint (brand-new
+campaign, nothing existing touched) without widening what the code can do.
+
+- [ ] **Step 1: A human creates the test campaign in the Amazon Ads console**
+
+| Setting | Value | Why |
+|---|---|---|
+| Name | `ZZ-API-TEST-DO-NOT-USE` | Unmistakable in every list and report |
+| Type | Sponsored Products, **Manual** targeting | Manual is required for keyword-level bids |
+| **State** | **PAUSED** | Cannot serve, cannot spend — a wrong bid costs $0 |
+| Daily budget | $1.00 | Second safety net if it is ever unpaused by accident |
+| Ad group | one, any name | Needed to hold a keyword |
+| Product | any low-priority ASIN | Required field; will not serve while paused |
+| Keyword | one, **exact** match, bid **$0.75** | $0.75 is deliberately distinctive so verification cannot be a coincidence |
+
+- [ ] **Step 2: Record the target in writing before touching anything**
+
+Account, profile, campaign name, keyword id, current bid, intended bid, and
+who authorised it. Confirm the campaign state really is `paused` from our own
+synced data, not from memory:
+
+```bash
+cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T postgres psql -U ppc_os -d ppc_os -c "SELECT c.name, c.status AS campaign_status, t.amazon_target_id, t.expression_text, t.bid FROM targets t JOIN ad_groups ag ON t.ad_group_id=ag.id JOIN campaigns c ON ag.campaign_id=c.id WHERE c.name ILIKE 'ZZ-API-TEST%';"
+```
+
+Expected: one row, `campaign_status = paused`, `bid = 0.75`. **If the campaign
+is not paused, stop.**
+
+A brand-new campaign has no performance history, so the rules engine will not
+generate a suggestion for it. Insert one test suggestion directly, pointing at
+this keyword. Be clear in the write-up that this proves the **execution and
+rollback** path — not the full rule → suggestion → approve chain, which needs
+a campaign with real data.
+
+- [ ] **Step 3: Capture the current value from Amazon, not from our database**
 
 ```bash
 cd /Users/tsth/Downloads/helium/ppc-os && docker compose exec -T postgres psql -U ppc_os -d ppc_os -c "SELECT amazon_target_id, expression_text, bid, status FROM targets WHERE amazon_target_id = <ID>;"
 ```
 
-- [ ] **Step 3: Enable writes for one operation only**
+- [ ] **Step 4: Enable writes for one operation only**
 
 ```bash
 cd /Users/tsth/Downloads/helium/ppc-os && sed -i '' 's/^AMAZON_WRITE_ENABLED=false/AMAZON_WRITE_ENABLED=true/' .env && docker compose up -d api worker && sleep 15 && curl -s http://localhost:8000/health
 ```
 
-- [ ] **Step 4: Execute exactly one suggestion**, then immediately re-sync that
+- [ ] **Step 5: Execute exactly one suggestion**, then immediately re-sync that
   profile and confirm Amazon returns the new bid.
 
-- [ ] **Step 5: Roll it back** using Task 6, and confirm the original value
+- [ ] **Step 6: Roll it back** using Task 6, and confirm the original value
   returns on the next sync. **The rollback is as important to prove as the write.**
 
-- [ ] **Step 6: Turn the switch back off**
+- [ ] **Step 7: Turn the switch back off**
 
 ```bash
 cd /Users/tsth/Downloads/helium/ppc-os && sed -i '' 's/^AMAZON_WRITE_ENABLED=true/AMAZON_WRITE_ENABLED=false/' .env && docker compose up -d api worker
 ```
 
-- [ ] **Step 7: Write up the result** in `docs/superpowers/plans/2026-08-06-write-verification.md`
+- [ ] **Step 8: Write up the result** in `docs/superpowers/plans/2026-08-06-write-verification.md`
   — the literal request, response, and both sync confirmations.
 
 ---
