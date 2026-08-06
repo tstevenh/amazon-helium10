@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # Periodic full sync interval. 0 disables the schedule entirely.
     sync_schedule_hours: int = 6
 
+    # ── Amazon WRITE access ────────────────────────────────────────────────
+    # Master kill-switch for every mutating Amazon Ads call. Defaults to False
+    # so no environment can change a live ad account by accident — including a
+    # fresh clone, a test run, or a misconfigured deploy. Turn on ONLY when the
+    # team has explicitly authorised writes, and turn it back off afterwards.
+    amazon_write_enabled: bool = False
+
     # Failure alerting. POSTs JSON to this URL (Slack/Discord/n8n webhook).
     # Empty disables delivery — send_alert() logs at ERROR and returns False.
     # A missing alert channel must never crash the scheduler, but it must
