@@ -47,12 +47,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.search_terms.repository import SearchTermRepository
 from app.modules.suggestions.repository import SuggestionRepository
 from app.modules.suggestions.asin import asin_safe_suggestion_type
-from app.modules.rules.models import Rule
+from app.modules.campaigns.models import Target
+from app.modules.rules.models import Rule, RuleCampaignScope
 from app.modules.rules.repository import RuleExecutionRepository
 
 logger = logging.getLogger(__name__)
@@ -157,11 +159,20 @@ class RuleEngine:
             action    = config.get("action")
 
             date_from = date.today() - timedelta(days=lookback)
+            # Scope to specific campaigns when the rule defines any; no rows
+            # in rule_campaign_scope means profile-wide.
+            scoped_ids = [
+                r.campaign_id for r in self.db.query(RuleCampaignScope)
+                .filter(RuleCampaignScope.rule_id == rule.id).all()
+            ]
             rows      = self.st_repo.get_aggregated_by_term(
-                profile_id = rule.profile_id,
-                date_from  = date_from,
-                date_to    = date.today(),
+                profile_id   = rule.profile_id,
+                date_from    = date_from,
+                date_to      = date.today(),
+                campaign_ids = scoped_ids or None,
             )
+            if scoped_ids:
+                logger.info("[rules] rule=%s scoped to %d campaigns", rule.id, len(scoped_ids))
 
             rows_evaluated = len(rows)
             created_count  = 0
@@ -212,6 +223,60 @@ class RuleEngine:
         ]
         return all(results) if logic == "AND" else any(results)
 
+    # ── Bid resolution ─────────────────────────────────────────────────────
+
+    _BID_TYPES = {"bid_increase", "bid_decrease", "bid_change"}
+
+    def _resolve_bid_change(
+        self, row: dict, suggestion_type: str, action: Optional[dict]
+    ) -> Optional[tuple]:
+        """For a bid suggestion, find the keyword to change and the new bid.
+
+        Returns (target, current_bid, new_bid) or None when the change cannot
+        be expressed — in which case no suggestion is created at all.
+
+        A bid rule evaluated over search terms only makes sense when the
+        search term IS a keyword you are already bidding on: that is the
+        object whose bid can be changed. A search term with no matching
+        keyword has nothing to act on, so it is skipped rather than turned
+        into a suggestion the execution job would later reject.
+        """
+        if suggestion_type not in self._BID_TYPES:
+            return None
+
+        ad_group_id = row.get("ad_group_id")
+        term = (row.get("search_term") or "").strip().lower()
+        if not ad_group_id or not term:
+            return None
+
+        target = (
+            self.db.query(Target)
+            .filter(
+                Target.ad_group_id == ad_group_id,
+                Target.target_kind == "keyword",
+                Target.deleted_at.is_(None),
+                func.lower(Target.expression_text) == term,
+            )
+            .first()
+        )
+        if target is None or target.bid is None:
+            return None
+
+        pct = float((action or {}).get("percent", 10))
+        current = float(target.bid)
+        if suggestion_type == "bid_increase":
+            new_bid = current * (1 + pct / 100.0)
+        else:
+            new_bid = current * (1 - pct / 100.0)
+
+        # Amazon rejects bids below its floor; skip rather than create a
+        # suggestion that is guaranteed to fail on execution.
+        new_bid = round(new_bid, 2)
+        if new_bid <= 0.02:
+            return None
+
+        return target, current, new_bid
+
     def _make_suggestion(
         self,
         row: dict,
@@ -239,6 +304,21 @@ class RuleEngine:
         kind    = self._kind_for_type(suggestion_type)
         reason  = self._build_reason(rule, action, row)
 
+        # A bid suggestion must carry the target and both values, or the
+        # execution job has nothing machine-readable to act on. This was the
+        # gap that made execution impossible in the first place.
+        target_id = current_value = suggested_value = None
+        if suggestion_type in self._BID_TYPES:
+            resolved = self._resolve_bid_change(row, suggestion_type, action)
+            if resolved is None:
+                return False
+            target, current_bid, new_bid = resolved
+            target_id       = target.id
+            current_value   = {"bid": current_bid}
+            suggested_value = {"bid": new_bid}
+            reason = (f"{reason} — bid ${current_bid:.2f} → ${new_bid:.2f}"
+                      if reason else f"bid ${current_bid:.2f} → ${new_bid:.2f}")
+
         snap = {
             "impressions":     row.get("impressions", 0),
             "clicks":          row.get("clicks", 0),
@@ -256,6 +336,9 @@ class RuleEngine:
             campaign_id      = row.get("campaign_id"),
             ad_group_id      = row.get("ad_group_id"),
             search_term      = search_term,
+            target_id        = target_id,
+            current_value    = current_value,
+            suggested_value  = suggested_value,
             suggestion_type  = suggestion_type,
             kind             = kind,
             reason           = reason,

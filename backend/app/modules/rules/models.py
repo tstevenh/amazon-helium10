@@ -36,3 +36,19 @@ class RuleExecution(Base):
     suggestions_generated = Column(Integer, nullable=False, server_default="0")
     error_message         = Column(Text, nullable=True)
     created_at            = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
+class RuleCampaignScope(Base):
+    """Restricts a rule to specific campaigns.
+
+    No rows for a rule means profile-wide — which is how every rule behaved
+    before scoping existed, so existing rules are unaffected.
+    """
+    __tablename__ = "rule_campaign_scope"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    rule_id = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="CASCADE"),
+                     nullable=False)
+    campaign_id = Column(UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"),
+                         nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
