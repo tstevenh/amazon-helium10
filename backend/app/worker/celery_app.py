@@ -23,7 +23,7 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=["app.worker.tasks", "app.worker.schedule", "app.worker.health",
-             "app.worker.execution_tasks"],
+             "app.worker.execution_tasks", "app.worker.rule_tasks"],
 )
 
 celery_app.conf.update(
@@ -53,6 +53,11 @@ def build_beat_schedule(hours: int) -> dict:
         schedule["enqueue-scheduled-syncs"] = {
             "task": "enqueue_scheduled_syncs",
             "schedule": float(hours * 60 * 60),
+        }
+    if settings.rule_schedule_hours > 0:
+        schedule["evaluate-all-rules"] = {
+            "task": "evaluate_all_rules",
+            "schedule": float(settings.rule_schedule_hours * 60 * 60),
         }
     # The health check runs regardless of whether periodic sync is enabled —
     # a manually-triggered sync can fail just as silently.

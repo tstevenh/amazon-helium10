@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     # Periodic full sync interval. 0 disables the schedule entirely.
     sync_schedule_hours: int = 6
+    # How often enabled rules are evaluated. Spec workflow 4 is a daily
+    # job. 0 disables it — rules can still be run by hand.
+    rule_schedule_hours: int = 24
 
     # ── Amazon WRITE access ────────────────────────────────────────────────
     # Master kill-switch for every mutating Amazon Ads call. Defaults to False
