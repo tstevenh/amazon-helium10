@@ -355,3 +355,39 @@ export interface ProfileCount {
   country_code: string | null
   campaigns: number
 }
+
+// ── Plan 3: Execution audit ────────────────────────────────────────────────
+
+/** One row of change_log — something that really changed on Amazon. */
+export interface ChangeLogEntry {
+  id: string
+  profile_id: string
+  entity_type: string
+  entity_id: string | null
+  amazon_entity_id: number | null
+  field_changed: string
+  old_value: string | null
+  new_value: string | null
+  suggestion_id: string | null
+  changed_by: string | null
+  source: string            // suggestion_execution | manual_edit | rollback
+  rolled_back_at: string | null
+  changed_at: string | null
+}
+
+export interface ChangeLogResponse {
+  count: number
+  changes: ChangeLogEntry[]
+}
+
+/** One execution attempt, with the literal Amazon exchange. */
+export interface SuggestionActionEntry {
+  id: string
+  action: string
+  performed_by: string | null
+  notes: string | null
+  amazon_api_request: Record<string, unknown> | null
+  amazon_api_response: Record<string, unknown> | null
+  amazon_api_status_code: number | null
+  created_at: string | null
+}

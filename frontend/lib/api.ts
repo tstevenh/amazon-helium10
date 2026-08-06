@@ -12,7 +12,8 @@
 import type {
   Account, AccountDetail, AdGroup, BulkResolveResponse, Campaign,
   ConnectionTestResponse, ExecuteRuleResponse, GenerateResponse,
-  OAuthStartResponse, Profile, ProfileCount, Rule, RuleExecution, SearchTermRow,
+  ChangeLogResponse, OAuthStartResponse, Profile, ProfileCount, Rule, RuleExecution,
+  SearchTermRow, SuggestionActionEntry,
   SearchTermSyncResponse, Suggestion, SyncAllResponse, SyncResult, SyncStatus,
   Target, TokenResponse, User,
 } from './types'
@@ -109,6 +110,31 @@ export const api = {
 
   /** Campaign counts per marketplace — lets the UI say WHERE the data is
    *  instead of telling an operator to run a sync that changes nothing. */
+  // ── Execution audit (Plan 3) ────────────────────────────────────────
+  /** What actually changed on Amazon, newest first. */
+  getChangeLog: (profileId?: string, limit = 200) =>
+    request<ChangeLogResponse>(
+      `/change-log?limit=${limit}` + (profileId ? `&profile_id=${profileId}` : ''),
+    ),
+
+  /** Undo one executed change by writing its old value back to Amazon. */
+  rollbackChange: (changeId: string) =>
+    request<{ ok: boolean; change_id: string; detail: string }>(
+      `/change-log/${changeId}/rollback`, { method: 'POST' },
+    ),
+
+  /** Every execution attempt for a suggestion, with the Amazon exchange. */
+  getSuggestionActions: (suggestionId: string) =>
+    request<{ suggestion_id: string; actions: SuggestionActionEntry[] }>(
+      `/suggestions/${suggestionId}/actions`,
+    ),
+
+  /** Apply an approved suggestion to Amazon. Admin only; returns 202. */
+  executeSuggestion: (suggestionId: string) =>
+    request<{ message: string; suggestion_id: string; status: string }>(
+      `/suggestions/${suggestionId}/execute`, { method: 'POST' },
+    ),
+
   getProfileCounts: (accountId: string) =>
     request<ProfileCount[]>(`/accounts/${accountId}/profile-counts`),
 
