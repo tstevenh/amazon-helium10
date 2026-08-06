@@ -12,7 +12,7 @@
 import type {
   Account, AccountDetail, AdGroup, BulkResolveResponse, Campaign,
   ConnectionTestResponse, ExecuteRuleResponse, GenerateResponse,
-  OAuthStartResponse, Profile, Rule, RuleExecution, SearchTermRow,
+  OAuthStartResponse, Profile, ProfileCount, Rule, RuleExecution, SearchTermRow,
   SearchTermSyncResponse, Suggestion, SyncAllResponse, SyncResult, SyncStatus,
   Target, TokenResponse, User,
 } from './types'
@@ -106,6 +106,11 @@ export const api = {
 
   getAccount: (id: string) =>
     request<AccountDetail>(`/accounts/${id}`),
+
+  /** Campaign counts per marketplace — lets the UI say WHERE the data is
+   *  instead of telling an operator to run a sync that changes nothing. */
+  getProfileCounts: (accountId: string) =>
+    request<ProfileCount[]>(`/accounts/${accountId}/profile-counts`),
 
   getProfiles: (accountId: string) =>
     request<Profile[]>(`/accounts/${accountId}/profiles`),

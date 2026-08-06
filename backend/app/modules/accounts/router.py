@@ -25,7 +25,8 @@ detail page instead of returning raw JSON. This gives users a proper success/err
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy import text as _sa_text
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -240,3 +241,37 @@ def delete_account(
     svc = AccountService(db)
     account = svc.get_account_or_404(account_id)
     svc.delete_account(account)
+
+
+@router.get("/{account_id}/profile-counts")
+def profile_counts(
+    account_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> JSONResponse:
+    """Row counts per marketplace, so the UI can say WHERE the data is.
+
+    An operator whose saved selection lands on an empty marketplace should be
+    told which one has data — not told to run an hour-long sync that will
+    change nothing. Two people have now lost time to that wrong advice.
+
+    One grouped query, not one per profile.
+    """
+    rows = db.execute(_sa_text("""
+        SELECT p.id, p.country_code,
+               count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL) AS campaigns
+        FROM ads_profiles p
+        LEFT JOIN campaigns c ON c.profile_id = p.id
+        WHERE p.seller_account_id = :aid
+        GROUP BY p.id, p.country_code
+        ORDER BY 3 DESC
+    """), {"aid": str(account_id)}).fetchall()
+
+    return JSONResponse(content=[
+        {
+            "profile_id": str(r[0]),
+            "country_code": r[1],
+            "campaigns": int(r[2] or 0),
+        }
+        for r in rows
+    ])

@@ -13,6 +13,7 @@ import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { emptyDataMessage } from '@/lib/emptyState'
 
 // ── Date range helpers ─────────────────────────────────────────────────────
 
@@ -45,8 +46,7 @@ export default function CampaignsPage() {
   const { user, loading: authLoading } = useAuth()
   const {
     currentAccountId, currentProfileId, currentAccount,
-    profiles, accountProfileIds, accountsLoading, profilesLoading,
-  } = useAccountProfile()
+    profiles, accountProfileIds, accountsLoading, profilesLoading, profileCounts, setCurrentProfile } = useAccountProfile()
   const router = useRouter()
 
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([])
@@ -290,7 +290,8 @@ export default function CampaignsPage() {
           emptyDescription={
             accountProfileIds.size === 0
               ? `No profiles synced for ${currentAccount?.name ?? 'this account'}.`
-              : 'No campaigns found. Run Sync All from Accounts to pull data.'
+              : emptyDataMessage({ entity: 'campaigns', profileCounts,
+                                   currentProfileId, accountName: currentAccount?.name }).message
           }
         />
       </div>

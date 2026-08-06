@@ -13,6 +13,7 @@ import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { emptyDataMessage } from '@/lib/emptyState'
 
 const LIMIT = 2000
 
@@ -24,8 +25,7 @@ export default function KeywordsPage() {
     currentAccount,
     accountProfileIds,
     accountsLoading,
-    profilesLoading,
-  } = useAccountProfile()
+    profilesLoading, profileCounts, setCurrentProfile } = useAccountProfile()
   const router = useRouter()
 
   const [keywords, setKeywords] = useState<Target[]>([])
@@ -228,7 +228,8 @@ export default function KeywordsPage() {
           emptyDescription={
             accountProfileIds.size === 0
               ? `No profiles synced for ${accountLabel}. Run Sync All from Settings → Accounts.`
-              : `No keywords found for ${accountLabel}. Run Sync All from Settings → Accounts.`
+              : emptyDataMessage({ entity: 'keywords', profileCounts,
+                                   currentProfileId, accountName: accountLabel }).message
           }
         />
       </div>

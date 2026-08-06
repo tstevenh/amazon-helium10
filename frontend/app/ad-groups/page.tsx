@@ -13,6 +13,7 @@ import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { emptyDataMessage } from '@/lib/emptyState'
 
 export default function AdGroupsPage() {
   const { user, loading: authLoading } = useAuth()
@@ -22,8 +23,7 @@ export default function AdGroupsPage() {
     currentAccount,
     accountProfileIds,
     accountsLoading,
-    profilesLoading,
-  } = useAccountProfile()
+    profilesLoading, profileCounts, setCurrentProfile } = useAccountProfile()
   const router = useRouter()
 
   const [adGroups, setAdGroups] = useState<AdGroup[]>([])
@@ -183,7 +183,8 @@ export default function AdGroupsPage() {
           emptyDescription={
             accountProfileIds.size === 0
               ? `No profiles synced for ${accountLabel}. Run Sync All from Settings → Accounts.`
-              : `No ad groups found for ${accountLabel}. Run Sync All from Settings → Accounts.`
+              : emptyDataMessage({ entity: 'ad groups', profileCounts,
+                                   currentProfileId, accountName: accountLabel }).message
           }
         />
       </div>

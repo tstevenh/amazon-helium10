@@ -348,3 +348,10 @@ export interface PerfSyncResponse {
   message: string
   result: PerfSyncResult
 }
+
+/** Campaign count per marketplace, used to explain empty screens. */
+export interface ProfileCount {
+  profile_id: string
+  country_code: string | null
+  campaigns: number
+}
