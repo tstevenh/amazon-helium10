@@ -124,3 +124,21 @@ def list_change_log(
             "changed_at": r.changed_at.isoformat() if r.changed_at else None,
         } for r in rows],
     })
+
+
+@execution_router.post("/change-log/{change_id}/rollback")
+def rollback_change(
+    change_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+) -> JSONResponse:
+    """Admin only. Undo one executed change by writing its old value back.
+
+    Runs inline rather than via the worker: a rollback is one short call and
+    the operator is usually watching, so an immediate answer is more useful
+    than a queued job they have to poll.
+    """
+    from app.modules.execution.service import RollbackService
+
+    result = RollbackService(db).rollback(change_id, current_user.id)
+    return JSONResponse(status_code=200 if result.get("ok") else 409, content=result)

@@ -29,8 +29,10 @@ from app.modules.campaigns.models import AdGroup, Campaign, Target
 from app.modules.execution.repository import (
     ACTION_EXECUTED,
     ACTION_EXECUTION_FAILED,
+    ACTION_ROLLED_BACK,
     ENTITY_TARGET,
     ExecutionRepository,
+    SOURCE_ROLLBACK,
     SOURCE_SUGGESTION_EXECUTION,
 )
 from app.modules.suggestions.models import Suggestion
@@ -209,3 +211,135 @@ class ExecutionService:
         return {"ok": True, "suggestion_id": str(suggestion.id),
                 "status": STATUS_EXECUTED,
                 "detail": f"bid {old_bid} -> {new_bid}"}
+
+
+class RollbackService:
+    """Undo one executed change by writing its old value back to Amazon.
+
+    The spec lists this as a known gap:
+
+        "Rollback / undo a specific executed change — Change Log records
+         old->new values but there's no 'revert this one change' button."
+
+    Built before the first real write rather than after, because an undo you
+    only build once you need it is an undo you don't have when you need it.
+
+    History is never rewritten. The rollback is recorded as a NEW change_log
+    row with source='rollback', and the original row is stamped with
+    rolled_back_at. Editing the original would make the audit trail a lie.
+    """
+
+    def __init__(self, db: Session) -> None:
+        self.db = db
+        self.repo = ExecutionRepository(db)
+        self._account_svc = AccountService(db)
+
+    def rollback(self, change_id: uuid.UUID, performed_by: uuid.UUID) -> dict[str, Any]:
+        change = self.repo.get_change(change_id)
+        if change is None:
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": "Change not found"}
+
+        if change.rolled_back_at is not None:
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": f"Already rolled back at {change.rolled_back_at.isoformat()}"}
+
+        if change.source == SOURCE_ROLLBACK:
+            # Rolling back a rollback would oscillate the value and confuse
+            # the trail. Roll back the original instead.
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": "This row is itself a rollback — roll back the original change"}
+
+        if change.old_value is None:
+            # Nothing to restore. This is why execution refuses to write a
+            # change_log row it cannot populate.
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": "No old_value recorded — nothing to restore"}
+
+        if change.field_changed != "bid" or change.entity_type != ENTITY_TARGET:
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": (f"Rollback supports target bid changes only, got "
+                               f"{change.entity_type}.{change.field_changed}")}
+
+        profile = (
+            self.db.query(AdsProfile).filter(AdsProfile.id == change.profile_id).one_or_none()
+        )
+        if profile is None:
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": f"Profile {change.profile_id} not found"}
+        account = (
+            self.db.query(SellerAccount)
+            .filter(SellerAccount.id == profile.seller_account_id)
+            .one_or_none()
+        )
+        if account is None:
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": "Seller account not found"}
+
+        amazon_id = change.amazon_entity_id
+        if amazon_id is None:
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": "No amazon_entity_id recorded — cannot address Amazon"}
+
+        restore_to = float(change.old_value)
+
+        try:
+            token = self._account_svc.get_valid_access_token(account)
+            result = amazon_ads_write.update_keyword_bid(
+                token, profile.amazon_profile_id, amazon_id, restore_to
+            )
+        except AmazonWriteDisabled as exc:
+            return {"ok": False, "change_id": str(change_id), "detail": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": f"{type(exc).__name__}: {exc}"}
+
+        if not result.get("ok"):
+            if change.suggestion_id:
+                self.repo.record_attempt(
+                    change.suggestion_id, ACTION_EXECUTION_FAILED,
+                    performed_by=performed_by,
+                    request=result.get("request"), response=result.get("response"),
+                    status_code=result.get("status_code"),
+                    notes=f"rollback of change {change_id} rejected by Amazon",
+                )
+            return {"ok": False, "change_id": str(change_id),
+                    "detail": "Amazon rejected the rollback",
+                    "response": result.get("response")}
+
+        # A new row, not an edit — the original stays exactly as it was.
+        self.repo.record_change(
+            profile_id=change.profile_id,
+            entity_type=change.entity_type,
+            field_changed=change.field_changed,
+            old_value=change.new_value,     # we are undoing this
+            new_value=change.old_value,     # back to what it was
+            source=SOURCE_ROLLBACK,
+            entity_id=change.entity_id,
+            amazon_entity_id=amazon_id,
+            suggestion_id=change.suggestion_id,
+            changed_by=performed_by,
+        )
+        self.repo.mark_rolled_back(change_id)
+
+        if change.suggestion_id:
+            self.repo.record_attempt(
+                change.suggestion_id, ACTION_ROLLED_BACK, performed_by=performed_by,
+                request=result.get("request"), response=result.get("response"),
+                status_code=result.get("status_code"),
+                notes=f"restored bid to {restore_to}",
+            )
+
+        # Keep the local copy consistent until the next sync.
+        target = (
+            self.db.query(Target).filter(Target.id == change.entity_id).one_or_none()
+            if change.entity_id else None
+        )
+        if target is not None:
+            target.bid = restore_to
+            self.db.commit()
+
+        logger.warning("[rollback] change %s undone: %s -> %s on target %s",
+                       change_id, change.new_value, change.old_value, amazon_id)
+        return {"ok": True, "change_id": str(change_id),
+                "detail": f"bid restored {change.new_value} -> {change.old_value}"}
