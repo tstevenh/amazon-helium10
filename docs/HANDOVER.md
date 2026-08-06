@@ -347,6 +347,60 @@ Two things Plan 2 also fixes:
 
 ---
 
+## ✅ 2026-08-06: V1 feature-complete except the gated live write
+
+Plans 3 and 4 are done. 32 commits on `feat/background-worker`, 134 tests.
+
+### The V1 loop now exists end to end
+
+| Spec workflow | Status |
+|---|---|
+| 1. Connect account → sync | ✅ |
+| 2. Browse live performance data | ✅ |
+| 3. Create a Bid Rule scoped to campaigns | ✅ |
+| 4. Daily job evaluates rules → suggestions | ✅ every 24 h |
+| 5. Inbox approve / reject / bulk | ✅ |
+| 6. Execution writes to Amazon | ✅ built, ⛔ never fired at a real bid |
+| 7. Logs show who/what/when/old→new | ✅ with an Undo button |
+
+All 7 V1 pages exist. Beat runs three schedules: sync 6 h, rules 24 h,
+health 30 min.
+
+### Safety model for writes
+
+`AMAZON_WRITE_ENABLED` defaults to **false** — with it off the write client
+raises before a request is even built. Three endpoints only (keyword bid,
+target bid, negative keyword); a test fails if anyone adds campaign creation.
+Every attempt is recorded in `suggestion_actions` *before* the call. A failed
+call writes no `change_log` row, because a row there means "this really
+changed". Rollback exists and was built before the first write, not after.
+
+Proven: the app created a paused test campaign on the live account
+(`153113201181536`) and read it back. **Changing an existing bid and undoing
+it is still unproven** — that is the one remaining step.
+
+### Bid suggestions are now executable
+
+A bid suggestion carries `target_id`, `current_value` and `suggested_value`.
+Without those the execution job had nothing to act on, which is why execution
+was impossible before. Verified live: 105 rows evaluated → 4 suggestions,
+each with a real target and bid change ($0.40 → $0.34).
+
+### Two field bugs fixed
+
+**Empty states lied.** A restored `localStorage` selection of MX — the only
+marketplace with zero campaigns — made every page say "Run Sync All to pull
+data". Two people concluded the app was broken. It now says "MX has no
+campaigns. US has 268, CA has 22." with a switch button.
+
+**Scheduled syncs would have hammered Amazon forever.** `force_full=True` was
+ported faithfully from the old daemon thread, where it was harmless because
+nothing ran on a schedule. With Beat it forced a 6–12 hour 90-day pull every
+6 hours. Now a 3-day rolling window, which is also exactly what the team
+asked for independently.
+
+---
+
 ## Recommended order of work
 
 1. **Review `feat/background-worker`** (11 commits) and `main` (13 commits
