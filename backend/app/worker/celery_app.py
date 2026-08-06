@@ -22,7 +22,8 @@ celery_app = Celery(
     "ppc_os",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.worker.tasks", "app.worker.schedule", "app.worker.health"],
+    include=["app.worker.tasks", "app.worker.schedule", "app.worker.health",
+             "app.worker.execution_tasks"],
 )
 
 celery_app.conf.update(
