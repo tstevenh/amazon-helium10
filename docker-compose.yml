@@ -84,6 +84,8 @@ services:
       - ./backend/pytest.ini:/app/pytest.ini
       # Mounted so new migrations are visible without rebuilding the image.
       - ./backend/alembic:/app/alembic
+      # One-off operational scripts, run via docker compose exec.
+      - ./scripts:/app/scripts
     env_file:
       - .env
     environment:
