@@ -70,8 +70,11 @@ class SyncJobRepository:
         job.finished_at = datetime.now(tz.utc)
         job.result_json = result
         job.records_synced = records
-        if errors:
-            job.error_message = "; ".join(str(e) for e in errors)[:4000]
+        # Set OR clear. A task retried after a transient failure (acks_late
+        # requeues on worker loss) would otherwise finish 'success' while
+        # still carrying the earlier attempt's error text, which reads as a
+        # contradiction in the audit trail.
+        job.error_message = "; ".join(str(e) for e in errors)[:4000] if errors else None
         self.db.commit()
         self.db.refresh(job)
         return job
