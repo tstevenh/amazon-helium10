@@ -23,6 +23,15 @@ class Suggestion(Base):
     status          = Column(String(20), nullable=False, server_default="pending")
     resolved_by     = Column(UUID(as_uuid=True), nullable=True)
     resolved_at     = Column(TIMESTAMP(timezone=True), nullable=True)
+    # ── Added by migration 014: makes a suggestion machine-actionable.
+    # Without these a suggestion can describe a change in prose but not
+    # express one the execution job can act on.
+    target_id       = Column(UUID(as_uuid=True), ForeignKey("targets.id", ondelete="SET NULL"), nullable=True)
+    current_value   = Column(JSONB, nullable=True)
+    suggested_value = Column(JSONB, nullable=True)
+    priority_score  = Column(Integer, nullable=True)
+    executed_at     = Column(TIMESTAMP(timezone=True), nullable=True)
+
     created_at      = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     updated_at      = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
