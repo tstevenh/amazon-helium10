@@ -14,8 +14,21 @@ from app.core.amazon_ads_write import AmazonWriteDisabled
 
 
 def test_write_is_disabled_by_default():
-    """A fresh environment must never be able to change a live ad account."""
-    assert settings.amazon_write_enabled is False
+    """A fresh environment must never be able to change a live ad account.
+
+    This asserts the *declared default*, not the current runtime value. The
+    original version read settings.amazon_write_enabled, so it failed on any
+    machine where writes were legitimately switched on — including the real
+    deployment. A test that goes red exactly when the feature is in use
+    trains people to ignore it, which is worse than not having it.
+    """
+    from app.config import Settings
+
+    field = Settings.model_fields["amazon_write_enabled"]
+    assert field.default is False, (
+        "the kill-switch default must stay False so an unconfigured "
+        "environment cannot write to Amazon"
+    )
 
 
 def test_assert_write_enabled_raises_when_disabled(monkeypatch):
