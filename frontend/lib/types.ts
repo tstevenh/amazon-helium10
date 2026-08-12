@@ -579,3 +579,56 @@ export interface KiTrendPoint {
   title_density: number | null
   estimated_sales: number | null
 }
+
+// ── Phase 3: anomalies, placements, opportunities ─────────────────────────
+
+export interface Anomaly {
+  campaign_id: string
+  campaign_name: string
+  marketplace: string | null
+  campaign_status: string
+  /** spend_change | acos_worsened | sales_stopped | budget_capped */
+  type: string
+  severity: 'high' | 'medium'
+  headline: string
+  detail: string
+  metric_delta_pct: number | null
+  window: { recent: string; baseline: string }
+}
+
+export interface PlacementMetrics {
+  impressions: number
+  clicks: number
+  spend: number
+  sales: number
+  orders: number
+  /** ratio, not percent — see the unit note in metricColumns */
+  acos: number | null
+  roas: number | null
+  cpc: number | null
+}
+
+export interface PlacementRow {
+  campaign_id: string
+  campaign_name: string
+  placement_bidding: Record<string, unknown> | null
+  placements: Record<string, PlacementMetrics>
+}
+
+export interface PlacementPage {
+  campaigns: PlacementRow[]
+  totals: Record<string, PlacementMetrics & { acos: number | null; roas: number | null }>
+  date_from?: string
+  date_to?: string
+}
+
+export interface OpportunityBundle {
+  snapshot_counts_by_asin: Record<string, number>
+  min_snapshots_for_trends: number
+  trends_available: boolean
+  volume_increasing: Record<string, unknown>[]
+  rank_declining: Record<string, unknown>[]
+  competition_increasing: Record<string, unknown>[]
+  missing_from_ppc: Record<string, unknown>[]
+  missing_from_listings: Record<string, unknown>[]
+}

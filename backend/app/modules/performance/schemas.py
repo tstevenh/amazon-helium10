@@ -82,6 +82,7 @@ class PerfSyncResult(BaseModel):
     campaign_rows: int = 0
     ad_group_rows: int = 0
     target_rows: int = 0
+    placement_rows: int = 0
     date_from: Optional[date] = None
     date_to: Optional[date] = None
     profiles_synced: int = 0

@@ -425,6 +425,35 @@ export const api = {
     return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
   },
 
+  // ── Phase 3 ─────────────────────────────────────────────────────────────
+
+  getAnomalies: (params: { profile_id?: string; account_id?: string }) => {
+    const qs = new URLSearchParams()
+    if (params.profile_id) qs.set('profile_id', params.profile_id)
+    if (params.account_id) qs.set('account_id', params.account_id)
+    return request<{ anomalies: import('./types').Anomaly[]; checked_profiles: number }>(
+      `/performance/anomalies?${qs}`,
+    )
+  },
+
+  getPlacements: (params: { profile_id?: string; account_id?: string }) => {
+    const qs = new URLSearchParams()
+    if (params.profile_id) qs.set('profile_id', params.profile_id)
+    if (params.account_id) qs.set('account_id', params.account_id)
+    return request<import('./types').PlacementPage>(`/performance/placements?${qs}`)
+  },
+
+  kiOpportunities: (asin?: string) =>
+    request<import('./types').OpportunityBundle>(
+      '/keyword-intel/opportunities' + (asin ? `?asin=${encodeURIComponent(asin)}` : ''),
+    ),
+
+  kiCompare: (myAsin: string, competitorAsin: string) =>
+    request<Record<string, unknown>>(
+      `/keyword-intel/compare?my_asin=${encodeURIComponent(myAsin)}` +
+      `&competitor_asin=${encodeURIComponent(competitorAsin)}`,
+    ),
+
   // ── Keyword Intelligence ────────────────────────────────────────────────
 
   kiStats: () => request<import('./types').KiStats>('/keyword-intel/stats'),

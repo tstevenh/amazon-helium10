@@ -183,6 +183,42 @@ def keyword_trend(
     return KeywordIntelService(db).keyword_trend(str(keyword_id), asin)
 
 
+# ── Opportunity Finder & Competitor Comparison (Phase 3) ───────────────────
+
+@router.get("/opportunities")
+def opportunities(
+    asin: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """All five opportunity patterns (spec §17.5).
+
+    Trend-based patterns return [] until there are >=3 snapshots for the ASIN,
+    and `trends_available` says so — an empty list with no explanation reads as
+    a bug rather than as "not enough history yet".
+    """
+    from app.modules.keyword_intel.opportunities import OpportunityFinder
+
+    return OpportunityFinder(db).all_opportunities(asin)
+
+
+@router.get("/compare")
+def compare_asins(
+    my_asin: str = Query(..., min_length=8),
+    competitor_asin: str = Query(..., min_length=8),
+    db: Session = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Keyword gap against a competitor ASIN.
+
+    Requires a snapshot covering the COMPETITOR's ASIN — meaning Cerebro run
+    against their listing, not yours.
+    """
+    from app.modules.keyword_intel.opportunities import OpportunityFinder
+
+    return OpportunityFinder(db).compare_asins(my_asin, competitor_asin)
+
+
 # ── Column mappings ────────────────────────────────────────────────────────
 
 @router.get("/mappings", response_model=list[MappingOut])

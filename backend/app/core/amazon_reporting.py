@@ -28,6 +28,7 @@ Raises RuntimeError if poll times out.
 import gzip
 import json
 import logging
+import re
 import time
 from datetime import date, timedelta
 from typing import Any, Callable, Optional
@@ -107,6 +108,24 @@ def _report_headers(access_token: str, profile_id: int) -> dict[str, str]:
 # Core async report flow
 # ---------------------------------------------------------------------------
 
+_DUPLICATE_REPORT_RE = re.compile(r"duplicate of\s*:?\s*([0-9a-f-]{16,})", re.IGNORECASE)
+
+
+def _existing_report_id_from_duplicate(resp: Any) -> Optional[str]:
+    """Pull the reportId out of Amazon's 425 duplicate message.
+
+    Parsed from the message text because Amazon does not return it as a field.
+    Returns None if the shape changes, so the caller falls back to raising
+    rather than silently polling nothing.
+    """
+    try:
+        detail = str(resp.json().get("detail", ""))
+    except Exception:
+        detail = resp.text or ""
+    match = _DUPLICATE_REPORT_RE.search(detail)
+    return match.group(1) if match else None
+
+
 def _request_report(
     access_token: str,
     profile_id: int,
@@ -148,6 +167,25 @@ def _request_report(
         },
     }
     resp = requests.post(url, json=body, headers=_report_headers(access_token, profile_id), timeout=30)
+
+    # Amazon deduplicates identical report requests and answers HTTP 425 with
+    # "The Request is a duplicate of : <reportId>". That is not a failure — the
+    # report exists and is generating. Reuse it.
+    #
+    # This matters well beyond the first request: a report takes 20-40 minutes,
+    # so any retry inside Amazon's dedup window hits it. Before this, a sync
+    # re-triggered after a network blip reported failure while Amazon was
+    # happily building the report we had just asked for.
+    if resp.status_code == 425:
+        existing = _existing_report_id_from_duplicate(resp)
+        if existing:
+            logger.warning(
+                "[reporting] %s report for profile %s (%s -> %s) already exists "
+                "as %s — reusing it instead of failing",
+                report_type, profile_id, start_date, end_date, existing,
+            )
+            return existing
+
     _raise_for_amazon_error(resp)
     data = resp.json()
     report_id = data.get("reportId", "")
@@ -602,4 +640,102 @@ def fetch_search_term_performance(
         "[reporting] fetch_search_term_performance profile=%s rows=%d skipped=%d",
         profile_id, len(normalised), skipped,
     )
+    return normalised
+
+
+# ---------------------------------------------------------------------------
+# Public API — placement performance
+# ---------------------------------------------------------------------------
+
+# Requested via spCampaigns + groupBy ['campaign','campaignPlacement'].
+# Verified against the live account on 2026-08-12: this combination returns
+# HTTP 200, unlike timeUnit HOURLY which Amazon refuses for this report type.
+_PLACEMENT_METRICS = [
+    "date",
+    "campaignId",
+    "placementClassification",
+    "impressions",
+    "clicks",
+    "cost",
+    "sales7d",
+    "purchases7d",
+]
+
+# Amazon's placementClassification strings are verbose and have changed spelling
+# between API versions. Normalising to the spec's three values keeps the CHECK
+# constraint and every query stable; anything unrecognised becomes 'other'
+# rather than being dropped, so a new Amazon label shows up as a visible bucket
+# instead of silently vanishing.
+_PLACEMENT_MAP = {
+    "top of search on-amazon": "top_of_search",
+    "top of search": "top_of_search",
+    "topofsearch": "top_of_search",
+    "detail page on-amazon": "product_pages",
+    "detail page": "product_pages",
+    "product pages": "product_pages",
+    "productpage": "product_pages",
+    "other on-amazon": "rest_of_search",
+    "rest of search": "rest_of_search",
+    "restofsearch": "rest_of_search",
+    "other": "rest_of_search",
+}
+
+
+def normalise_placement(raw: Any) -> str:
+    """Map Amazon's placement label onto the spec's vocabulary."""
+    key = str(raw or "").strip().lower()
+    if not key:
+        return "other"
+    if key in _PLACEMENT_MAP:
+        return _PLACEMENT_MAP[key]
+    # Substring fallback before giving up: Amazon prefixes and suffixes these
+    # labels differently across marketplaces.
+    for needle, value in _PLACEMENT_MAP.items():
+        if needle in key or key in needle:
+            return value
+    logger.warning("[reporting] unknown placementClassification %r -> 'other'", raw)
+    return "other"
+
+
+def fetch_placement_performance(
+    access_token: str,
+    profile_id: int,
+    start_date: date,
+    end_date: date,
+    token_getter: Optional[Callable[[], str]] = None,
+) -> list[dict[str, Any]]:
+    """Fetch SP campaign performance split by placement.
+
+    Returns dicts of:
+      amazon_campaign_id, date, placement, impressions, clicks, spend, sales,
+      orders, acos
+    """
+    if settings.amazon_mock_mode:
+        return []
+
+    raw_rows = _fetch_report_chunked(
+        access_token, profile_id,
+        "spCampaigns", _PLACEMENT_METRICS,
+        start_date, end_date,
+        group_by=["campaign", "campaignPlacement"],
+        token_getter=token_getter,
+    )
+
+    normalised = []
+    for r in raw_rows:
+        spend = _safe_decimal(r.get("cost")) or 0.0
+        sales = _safe_decimal(r.get("sales7d")) or 0.0
+        normalised.append({
+            "amazon_campaign_id": int(r["campaignId"]),
+            "date": r.get("date"),
+            "placement": normalise_placement(r.get("placementClassification")),
+            "impressions": _safe_int(r.get("impressions")),
+            "clicks": _safe_int(r.get("clicks")),
+            "spend": spend,
+            "sales": sales,
+            "orders": _safe_int(r.get("purchases7d")),
+            "acos": round(spend / sales * 100, 4) if sales else None,
+        })
+    logger.warning("[reporting] fetch_placement_performance profile=%s rows=%d",
+                   profile_id, len(normalised))
     return normalised

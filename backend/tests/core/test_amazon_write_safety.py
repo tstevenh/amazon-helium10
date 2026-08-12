@@ -51,7 +51,8 @@ def test_every_public_write_function_checks_the_switch():
     """
     src = inspect.getsource(w)
     for name in ("update_keyword_bid", "update_target_bid", "create_negative_keyword",
-                 "update_campaign_state", "update_campaign_budget"):
+                 "update_campaign_state", "update_campaign_budget",
+                 "update_campaign_placement_bidding"):
         if f"def {name}(" not in src:
             continue   # not implemented yet — Task 2 adds these
         fn_src = src[src.index(f"def {name}("):]
@@ -137,3 +138,42 @@ def test_budget_write_sends_only_the_budget():
     body_src = "\n".join(body_lines)
     for field in ('"state"', '"name"', '"targetingType"'):
         assert field not in body_src, f"budget write must not include {field}"
+
+
+def test_placement_adjustment_rejects_values_outside_amazons_range(monkeypatch):
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import PlacementAdjustmentRefused
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", True)
+    for bad in (-1, 901, "abc", None):
+        with pytest.raises(PlacementAdjustmentRefused):
+            w.update_campaign_placement_bidding("tok", 1, 123, {"top_of_search": bad})
+
+
+def test_placement_adjustment_rejects_an_unknown_placement(monkeypatch):
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import PlacementAdjustmentRefused
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", True)
+    with pytest.raises(PlacementAdjustmentRefused):
+        w.update_campaign_placement_bidding("tok", 1, 123, {"somewhere_else": 10})
+
+
+def test_placement_adjustment_refuses_an_empty_set(monkeypatch):
+    """Sending {} would replace the array with nothing, resetting every
+    adjustment to zero — a destructive no-op."""
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import PlacementAdjustmentRefused
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", True)
+    with pytest.raises(PlacementAdjustmentRefused):
+        w.update_campaign_placement_bidding("tok", 1, 123, {})
+
+
+def test_placement_write_is_gated_by_the_kill_switch(monkeypatch):
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import AmazonWriteDisabled
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", False)
+    with pytest.raises(AmazonWriteDisabled):
+        w.update_campaign_placement_bidding("tok", 1, 123, {"top_of_search": 10})

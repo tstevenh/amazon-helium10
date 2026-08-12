@@ -295,6 +295,85 @@ def get_ad_group_targets_with_metrics(
     return result
 
 
+# ── Anomalies & placement (Phase 3) ───────────────────────────────────────
+
+@router.get("/anomalies")
+def get_anomalies(
+    profile_id: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None),
+    recent_days: int = Query(3, ge=1, le=14),
+    baseline_days: int = Query(14, ge=5, le=90),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """What changed lately, for the Dashboard anomaly panel (spec §13.1)."""
+    from app.modules.performance.anomalies import AnomalyDetector
+
+    profile_ids = _resolve_profile_ids(db, profile_id, account_id)
+    if not profile_ids:
+        return {"anomalies": [], "checked_profiles": 0}
+    found = AnomalyDetector(db).detect(
+        profile_ids, recent_days=recent_days, baseline_days=baseline_days,
+    )
+    return {"anomalies": found, "checked_profiles": len(profile_ids)}
+
+
+@router.get("/placements")
+def get_placement_performance(
+    date_from: Optional[date] = Query(None),
+    date_to:   Optional[date] = Query(None),
+    profile_id: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Spend split by where the ad appeared, per campaign."""
+    if not date_from or not date_to:
+        date_from, date_to = _default_dates()
+    profile_ids = _resolve_profile_ids(db, profile_id, account_id)
+    if not profile_ids:
+        return {"campaigns": [], "totals": {}}
+
+    campaigns = db.query(Campaign).filter(
+        Campaign.profile_id.in_([uuid.UUID(p) for p in profile_ids]),
+        Campaign.deleted_at.is_(None),
+    ).all()
+    repo = PerformanceRepository(db)
+    by_campaign = repo.placement_summary(
+        [str(c.id) for c in campaigns], date_from, date_to,
+    )
+
+    out = []
+    totals: dict[str, dict] = {}
+    for c in campaigns:
+        placements = by_campaign.get(str(c.id))
+        if not placements:
+            continue
+        out.append({
+            "campaign_id": str(c.id),
+            "campaign_name": c.name,
+            "placement_bidding": c.placement_bidding,
+            "placements": placements,
+        })
+        for name, m in placements.items():
+            agg = totals.setdefault(name, {"spend": 0.0, "sales": 0.0,
+                                           "clicks": 0, "orders": 0})
+            agg["spend"] += m["spend"]
+            agg["sales"] += m["sales"]
+            agg["clicks"] += m["clicks"]
+            agg["orders"] += m["orders"]
+
+    for name, agg in totals.items():
+        agg["acos"] = (agg["spend"] / agg["sales"] * 100) if agg["sales"] else None
+        agg["roas"] = (agg["sales"] / agg["spend"]) if agg["spend"] else None
+
+    # Highest spend first: the placement taking the most money is the one worth
+    # looking at, whether it is performing or not.
+    out.sort(key=lambda r: -sum(p["spend"] for p in r["placements"].values()))
+    return {"campaigns": out, "totals": totals,
+            "date_from": date_from.isoformat(), "date_to": date_to.isoformat()}
+
+
 # ── Manual perf sync ──────────────────────────────────────────────────────
 
 @router.post("/sync", response_model=PerfSyncResponse)

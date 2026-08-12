@@ -447,3 +447,77 @@ class PerformanceRepository:
         return int(self.db.execute(stmt, {
             "profile_ids": profile_ids, "target_kind": target_kind,
         }).scalar() or 0)
+
+    # ── Placement performance ──────────────────────────────────────────────
+
+    def upsert_placement_perf(self, rows: list[dict]) -> int:
+        """Upsert on (campaign_id, date, placement).
+
+        Upsert rather than insert because a re-sync of overlapping dates is
+        normal — the daily job always re-pulls a few recent days, since Amazon
+        revises attributed sales for up to two weeks after the click.
+        """
+        if not rows:
+            return 0
+        stmt = text("""
+            INSERT INTO placement_performance_daily
+                (campaign_id, date, placement, impressions, clicks, spend,
+                 sales, orders, acos)
+            VALUES
+                (:campaign_id, :date, :placement, :impressions, :clicks,
+                 :spend, :sales, :orders, :acos)
+            ON CONFLICT (campaign_id, date, placement) DO UPDATE SET
+                impressions = EXCLUDED.impressions,
+                clicks      = EXCLUDED.clicks,
+                spend       = EXCLUDED.spend,
+                sales       = EXCLUDED.sales,
+                orders      = EXCLUDED.orders,
+                acos        = EXCLUDED.acos
+        """)
+        self.db.execute(stmt, rows)
+        self.db.commit()
+        return len(rows)
+
+    def placement_summary(
+        self,
+        campaign_ids: list[str],
+        date_from: date,
+        date_to: date,
+    ) -> dict[str, dict[str, dict]]:
+        """{campaign_id: {placement: metrics}} over the window."""
+        if not campaign_ids:
+            return {}
+        stmt = text("""
+            SELECT campaign_id::text AS campaign_id, placement,
+                   SUM(impressions) AS impressions,
+                   SUM(clicks)      AS clicks,
+                   SUM(spend)       AS spend,
+                   SUM(sales)       AS sales,
+                   SUM(orders)      AS orders
+            FROM placement_performance_daily
+            WHERE campaign_id::text = ANY(:ids)
+              AND date BETWEEN :date_from AND :date_to
+            GROUP BY campaign_id, placement
+        """)
+        rows = self.db.execute(stmt, {
+            "ids": campaign_ids, "date_from": date_from, "date_to": date_to,
+        }).mappings().all()
+
+        out: dict[str, dict[str, dict]] = {}
+        for r in rows:
+            spend = Decimal(str(r["spend"] or 0))
+            sales = Decimal(str(r["sales"] or 0))
+            clicks = int(r["clicks"] or 0)
+            out.setdefault(r["campaign_id"], {})[r["placement"]] = {
+                "impressions": int(r["impressions"] or 0),
+                "clicks": clicks,
+                "spend": float(spend),
+                "sales": float(sales),
+                "orders": int(r["orders"] or 0),
+                # Ratio, matching the convention rule rows use — see the unit
+                # trap documented in tests/modules/test_budget_rules.py.
+                "acos": float(spend / sales) if sales else None,
+                "roas": float(sales / spend) if spend else None,
+                "cpc": float(spend / clicks) if clicks else None,
+            }
+        return out

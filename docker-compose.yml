@@ -38,6 +38,11 @@ services:
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
       - ./backend/pytest.ini:/app/pytest.ini
+      # Long-running operational scripts belong here rather than in api:
+      # restarting api to pick up a code change kills anything running inside
+      # it, and a placement report takes 20-40 minutes to generate.
+      - ./scripts:/app/scripts
+      - ./backend/alembic:/app/alembic
     env_file:
       - .env
     environment:

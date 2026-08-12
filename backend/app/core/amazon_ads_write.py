@@ -268,3 +268,83 @@ def update_campaign_budget(
                    campaign_id, new_budget, profile_id)
     resp = _request_with_retry("PUT", url, json=body, headers=headers, timeout=30)
     return _parse_mutation_result(resp, body, "campaigns")
+
+
+# ---------------------------------------------------------------------------
+# Placement bid adjustments — placement rules only
+# ---------------------------------------------------------------------------
+#
+# Amazon expresses these as a PERCENTAGE UPLIFT on the keyword bid per
+# placement, not as an absolute bid. 0 means "no adjustment"; 50 means "bid 50%
+# more here". Amazon's ceiling is 900.
+#
+# Sending the full set every time is deliberate: the API replaces the
+# placementBidding array wholesale, so omitting a placement silently resets it
+# to 0. A partial update would look like it worked and quietly cancel an
+# adjustment somebody set last month.
+
+_MAX_PLACEMENT_ADJUSTMENT = 900
+
+# Our vocabulary -> Amazon's placement identifiers.
+_PLACEMENT_TO_AMAZON = {
+    "top_of_search": "PLACEMENT_TOP",
+    "product_pages": "PLACEMENT_PRODUCT_PAGE",
+    "rest_of_search": "PLACEMENT_REST_OF_SEARCH",
+}
+
+
+class PlacementAdjustmentRefused(Exception):
+    """A placement adjustment Amazon would reject, or that names no placement."""
+
+
+def update_campaign_placement_bidding(
+    access_token: str,
+    profile_id: int,
+    campaign_id: int,
+    adjustments: dict[str, float],
+    strategy: str = "autoForSales",
+) -> dict[str, Any]:
+    """PUT /sp/campaigns — set placement bid adjustments for one campaign.
+
+    `adjustments` maps our placement names to percentages, e.g.
+    {"top_of_search": 25, "product_pages": 0}. Every placement present is sent;
+    see the note above about wholesale replacement.
+    """
+    assert_write_enabled()
+
+    if not adjustments:
+        raise PlacementAdjustmentRefused("no placement adjustments supplied")
+
+    entries = []
+    for name, pct in adjustments.items():
+        amazon_name = _PLACEMENT_TO_AMAZON.get(name)
+        if amazon_name is None:
+            raise PlacementAdjustmentRefused(
+                f"unknown placement {name!r}; allowed: "
+                f"{', '.join(sorted(_PLACEMENT_TO_AMAZON))}"
+            )
+        try:
+            value = float(pct)
+        except (TypeError, ValueError):
+            raise PlacementAdjustmentRefused(f"adjustment {pct!r} is not a number")
+        if value < 0 or value > _MAX_PLACEMENT_ADJUSTMENT:
+            raise PlacementAdjustmentRefused(
+                f"adjustment {value} for {name} is outside Amazon's "
+                f"0-{_MAX_PLACEMENT_ADJUSTMENT}% range"
+            )
+        entries.append({"placement": amazon_name, "percentage": round(value, 2)})
+
+    body = {"campaigns": [{
+        "campaignId": str(campaign_id),
+        "dynamicBidding": {
+            "strategy": strategy,
+            "placementBidding": entries,
+        },
+    }]}
+    url = f"{settings.amazon_api_base_url}/sp/campaigns"
+    headers = _write_headers(access_token, profile_id,
+                             "application/vnd.spCampaign.v3+json")
+    logger.warning("[amazon_write] PUT campaign=%s placementBidding=%s profile=%s",
+                   campaign_id, entries, profile_id)
+    resp = _request_with_retry("PUT", url, json=body, headers=headers, timeout=30)
+    return _parse_mutation_result(resp, body, "campaigns")

@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
-import type { CampaignWithMetrics, SyncJobRow, Suggestion } from '@/lib/types'
+import type { CampaignWithMetrics, SyncJobRow, Suggestion, Anomaly } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -32,6 +32,7 @@ export default function DashboardPage() {
   const [jobs, setJobs]           = useState<SyncJobRow[]>([])
   const [pending, setPending]     = useState<Suggestion[]>([])
   const [changeCount, setChangeCount] = useState(0)
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([])
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
@@ -44,7 +45,7 @@ export default function DashboardPage() {
     setLoading(true); setError(null)
     try {
       const profileIds = currentProfileId ? [currentProfileId] : Array.from(accountProfileIds)
-      const [camps, syncPage, suggestionBatches, changeRows] = await Promise.all([
+      const [camps, syncPage, suggestionBatches, changeRows, anomalyPage] = await Promise.all([
         api.getCampaignsWithMetrics(
           currentProfileId ? { profile_id: currentProfileId } : { account_id: currentAccountId },
         ),
@@ -52,6 +53,11 @@ export default function DashboardPage() {
         // Suggestions are per-profile; "All Profiles" means asking each one.
         Promise.all(profileIds.map(pid => api.listSuggestions({ profile_id: pid, status: 'pending' }))),
         api.getChangeLog(currentProfileId ?? undefined, 1),
+        // Anomalies are advisory: a failure here must not blank the whole
+        // dashboard, so it degrades to an empty panel.
+        api.getAnomalies(
+          currentProfileId ? { profile_id: currentProfileId } : { account_id: currentAccountId },
+        ).catch(() => ({ anomalies: [], checked_profiles: 0 })),
       ])
       setCampaigns(camps)
       setJobs(syncPage.jobs)
@@ -59,6 +65,7 @@ export default function DashboardPage() {
       // The endpoint reports the true total, so the tile is exact rather
       // than "however many we happened to fetch".
       setChangeCount(changeRows.count)
+      setAnomalies(anomalyPage.anomalies)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Failed to load dashboard')
     } finally {
@@ -140,6 +147,53 @@ export default function DashboardPage() {
           {' '}View sync monitor →
         </span>
       </button>
+
+      {/* What changed — spec §13.1's anomaly panel. Above the KPI numbers on
+          purpose: an average hides the campaign that broke yesterday. */}
+      {anomalies.length > 0 && (
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900 text-sm">Needs a look</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Campaigns that changed sharply in the last few days versus the two
+              weeks before. Not threshold breaches — changes.
+            </p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {anomalies.slice(0, 6).map((a, i) => (
+              <button
+                key={`${a.campaign_id}-${a.type}-${i}`}
+                onClick={() => router.push(`/campaigns/${a.campaign_id}`)}
+                className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3"
+              >
+                <span className={`mt-0.5 shrink-0 text-xs px-2 py-0.5 rounded font-medium ${
+                  a.severity === 'high'
+                    ? 'bg-red-100 text-red-700'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {a.severity}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-gray-900 truncate">
+                    {a.headline}
+                  </span>
+                  <span className="block text-xs text-gray-500 truncate">
+                    {a.campaign_name}
+                    {a.marketplace && ` · ${a.marketplace}`}
+                    {a.campaign_status !== 'enabled' && ` · ${a.campaign_status}`}
+                  </span>
+                  <span className="block text-xs text-gray-400 mt-0.5">{a.detail}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {anomalies.length > 6 && (
+            <p className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
+              {anomalies.length - 6} more not shown.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Money */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">

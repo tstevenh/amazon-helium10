@@ -133,7 +133,7 @@ class PerformanceService:
         access_token = self._get_access_token(account)
         profiles = self._get_profiles(account)
 
-        total_camp = total_ag = total_tgt = 0
+        total_camp = total_ag = total_tgt = total_pl = 0
         start_date = end_date = None
 
         for profile in profiles:
@@ -252,17 +252,52 @@ class PerformanceService:
                     pass
                 logger.error("[perf] Target perf failed profile %s: %s", profile.amazon_profile_id, exc)
 
+            # ── Placement performance ──────────────────────────────────────
+            # Last, and deliberately non-fatal: placement is the least critical
+            # grain (the spec calls Placement Rules "lowest usage signal"), so a
+            # failure here must not cost the campaign, ad group and target rows
+            # already committed above.
+            try:
+                access_token = self._get_access_token(account, force=True)
+                raw_pl = amazon_reporting.fetch_placement_performance(
+                    access_token, profile.amazon_profile_id, start_date, end_date,
+                    token_getter=token_getter,
+                )
+                pl_rows = []
+                for r in raw_pl:
+                    camp = camp_map.get(r["amazon_campaign_id"])
+                    if camp is None:
+                        continue
+                    pl_rows.append({
+                        "campaign_id": str(camp.id), "date": r["date"],
+                        "placement": r["placement"],
+                        "impressions": r["impressions"], "clicks": r["clicks"],
+                        "spend": r["spend"], "sales": r["sales"],
+                        "orders": r["orders"], "acos": r["acos"],
+                    })
+                total_pl += self.repo.upsert_placement_perf(pl_rows)
+                logger.warning("[perf] Placement perf upserted %d rows (from %d raw)",
+                               len(pl_rows), len(raw_pl))
+            except Exception as exc:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+                logger.error("[perf] Placement perf failed profile %s: %s",
+                             profile.amazon_profile_id, exc)
+
             # Mark profile synced — all errors above are rolled back so the
             # session is clean and this commit will always succeed.
             profile.last_perf_synced_at = datetime.now(timezone.utc)
             self.db.commit()
 
-        logger.warning("[perf] sync_performance DONE camp=%d ag=%d tgt=%d profiles=%d",
-                       total_camp, total_ag, total_tgt, len(profiles))
+        logger.warning("[perf] sync_performance DONE camp=%d ag=%d tgt=%d pl=%d profiles=%d",
+                       total_camp, total_ag, total_tgt, total_pl, len(profiles))
         return PerfSyncResult(
             campaign_rows=total_camp,
             ad_group_rows=total_ag,
             target_rows=total_tgt,
+            placement_rows=total_pl,
             date_from=start_date,
             date_to=end_date,
             profiles_synced=len(profiles),
