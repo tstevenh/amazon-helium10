@@ -339,6 +339,52 @@ export default function SuggestionsPage() {
     }
   }
 
+  /**
+   * Apply an approved suggestion to Amazon.
+   *
+   * Separate from Approve on purpose. The spec is explicit: "Mandatory:
+   * Rule -> Suggestion -> Human Review -> Apply. NO auto-apply in V1."
+   * Approving records intent; executing changes a live ad account.
+   */
+  async function handleExecute(s: Suggestion) {
+    const target = s.search_term || 'this target'
+    const ok = window.confirm(
+      `Apply this change to Amazon?\n\n` +
+      `${s.suggestion_type} on "${target}"\n${s.reason}\n\n` +
+      `This writes to your live ad account.`,
+    )
+    if (!ok) return
+
+    setActioning(a => ({ ...a, [s.id]: true }))
+    setActionError(null)
+    try {
+      await api.executeSuggestion(s.id)
+      // Execution runs in the worker; poll the attempt trail for the outcome
+      // rather than pretending it finished.
+      let outcome = 'queued'
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 2000))
+        const { actions } = await api.getSuggestionActions(s.id)
+        const latest = actions[0]
+        if (latest && latest.action !== 'approved') {
+          outcome = latest.action === 'executed' && latest.amazon_api_response
+            ? 'executed'
+            : latest.action
+          if (latest.action === 'execution_failed') {
+            setActionError(latest.notes || 'Execution failed — see Logs')
+          }
+          break
+        }
+      }
+      if (outcome === 'executed') setActionError(null)
+      await load()
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : 'Execution failed')
+    } finally {
+      setActioning(a => ({ ...a, [s.id]: false }))
+    }
+  }
+
   async function handleReject(id: string) {
     setActioning(a => ({ ...a, [id]: true }))
     setActionError(null)
@@ -455,7 +501,10 @@ export default function SuggestionsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Suggestion Inbox</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            AI-generated negative, harvest &amp; bid adjustment suggestions
+            {/* Not AI: every suggestion comes from a threshold rule you can read
+                and edit on the Rules page. Saying "AI" would hide that. */}
+            Negative, harvest &amp; bid suggestions from your rule thresholds — nothing
+            is sent to Amazon until you approve it
           </p>
         </div>
         <button
@@ -693,6 +742,15 @@ export default function SuggestionsPage() {
                             {isBusy ? '…' : 'Reject'}
                           </button>
                         </div>
+                      ) : s.status === 'approved' ? (
+                        <button
+                          onClick={() => handleExecute(s)}
+                          disabled={isBusy}
+                          className="text-xs px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                          title="Apply this change to Amazon"
+                        >
+                          {isBusy ? 'Applying…' : 'Apply to Amazon'}
+                        </button>
                       ) : (
                         <span className="text-xs text-gray-400 capitalize">{s.status}</span>
                       )}

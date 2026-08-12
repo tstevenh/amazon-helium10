@@ -17,6 +17,10 @@ export interface Column<T> {
 
 interface DataTableProps<T> {
   columns: Column<T>[]
+  /** Column index to sort by on first render. Omit for API order. */
+  defaultSortCol?: number
+  /** Direction for defaultSortCol. */
+  defaultSortDir?: SortDir
   rows: T[]
   rowKey: (row: T) => string
   onRowClick?: (row: T) => void
@@ -28,6 +32,8 @@ interface DataTableProps<T> {
 }
 
 export function DataTable<T>({
+  defaultSortCol,
+  defaultSortDir,
   columns,
   rows,
   rowKey,
@@ -38,16 +44,35 @@ export function DataTable<T>({
   emptyDescription,
   className = '',
 }: DataTableProps<T>) {
-  const [sortCol, setSortCol] = useState<number | null>(null)
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  // Default sort matters: an operator opening a table should see the rows
+  // that need attention, not whatever order the API happened to return.
+  const [sortCol, setSortCol] = useState<number | null>(defaultSortCol ?? null)
+  const [sortDir, setSortDir] = useState<SortDir>(defaultSortDir ?? 'asc')
   const [page, setPage] = useState(1)
 
   const sorted = useMemo(() => {
     if (sortCol === null || !columns[sortCol]?.sortValue) return rows
     const sv = columns[sortCol].sortValue!
     return [...rows].sort((a, b) => {
-      const va = sv(a) ?? ''
-      const vb = sv(b) ?? ''
+      const ra = sv(a)
+      const rb = sv(b)
+
+      // Money and metrics arrive from the API as numeric STRINGS ('8.97'),
+      // so a plain < / > comparison sorts them alphabetically: "8.97" beats
+      // "27.71" because '8' > '2'. Compare numerically whenever both sides
+      // look like numbers, and fall back to text for real strings.
+      const na = typeof ra === 'number' ? ra : (ra == null || ra === '' ? NaN : Number(ra))
+      const nb = typeof rb === 'number' ? rb : (rb == null || rb === '' ? NaN : Number(rb))
+      const bothNumeric = !Number.isNaN(na) && !Number.isNaN(nb)
+
+      if (bothNumeric) {
+        if (na < nb) return sortDir === 'asc' ? -1 : 1
+        if (na > nb) return sortDir === 'asc' ? 1 : -1
+        return 0
+      }
+
+      const va = ra ?? ''
+      const vb = rb ?? ''
       if (va < vb) return sortDir === 'asc' ? -1 : 1
       if (va > vb) return sortDir === 'asc' ? 1 : -1
       return 0

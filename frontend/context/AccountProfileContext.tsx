@@ -25,7 +25,7 @@ import {
 } from 'react'
 import { api } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
-import type { Account, Profile } from '@/lib/types'
+import type { Account, Profile, ProfileCount } from '@/lib/types'
 
 // ── Persistence ───────────────────────────────────────────────────────────
 
@@ -75,6 +75,8 @@ export interface AccountProfileContextValue {
   accountsLoading: boolean
   /** True while profiles are being fetched after an account change */
   profilesLoading: boolean
+  /** Campaign count per marketplace — used to explain empty screens */
+  profileCounts: ProfileCount[]
   /** Switch to a different account; resets profile to All */
   setCurrentAccount: (accountId: string) => void
   /** Set the active profile; null = All Profiles */
@@ -93,6 +95,7 @@ const defaultCtx: AccountProfileContextValue = {
   accountProfileIds: new Set(),
   accountsLoading: true,
   profilesLoading: false,
+  profileCounts: [],
   setCurrentAccount: () => {},
   setCurrentProfile: () => {},
   refreshProfiles: async () => {},
@@ -111,6 +114,8 @@ export function AccountProfileProvider({ children }: { children: ReactNode }) {
   const [currentProfileId, setCurrentProfileId] = useState<string | null>(null)
   const [accountsLoading, setAccountsLoading] = useState(true)
   const [profilesLoading, setProfilesLoading] = useState(false)
+  // Campaign counts per marketplace, so an empty screen can explain itself.
+  const [profileCounts, setProfileCounts] = useState<ProfileCount[]>([])
 
   // Load profiles for a given account id; returns the fetched list
   const fetchProfiles = useCallback(async (accountId: string): Promise<Profile[]> => {
@@ -118,9 +123,15 @@ export function AccountProfileProvider({ children }: { children: ReactNode }) {
     try {
       const profs = await api.getProfiles(accountId)
       setProfiles(profs)
+      // Non-fatal: without counts the empty state just falls back to its
+      // generic message rather than naming the marketplace with data.
+      api.getProfileCounts(accountId)
+        .then(setProfileCounts)
+        .catch(() => setProfileCounts([]))
       return profs
     } catch {
       setProfiles([])
+      setProfileCounts([])
       return []
     } finally {
       setProfilesLoading(false)
@@ -225,6 +236,7 @@ export function AccountProfileProvider({ children }: { children: ReactNode }) {
     accountProfileIds,
     accountsLoading,
     profilesLoading,
+    profileCounts,
     setCurrentAccount,
     setCurrentProfile,
     refreshProfiles,

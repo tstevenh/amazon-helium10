@@ -31,11 +31,16 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.modules.search_terms.repository import SearchTermRepository
+from app.modules.suggestions import asin as _asin
 from app.modules.suggestions.repository import SuggestionRepository
 
 logger = logging.getLogger(__name__)
 
 _NON_PURCHASE_PREFIXES = ("how to", "free", "diy", "what is", "why ", "where to find")
+
+# ASIN handling is shared with the rules engine — see suggestions/asin.py.
+# Re-exported so existing references and tests keep working.
+_ASIN_RE = _asin._ASIN_RE
 
 
 # ── Confidence scoring ─────────────────────────────────────────────────────────
@@ -234,6 +239,28 @@ class SuggestionEngine:
         cvr    = float(row.get("conversion_rate") or 0)
         term   = row["search_term"].lower().strip()
         is_npi = any(term.startswith(pfx) for pfx in _NON_PURCHASE_PREFIXES)
+        is_asin = bool(_ASIN_RE.match(term))
+
+        # ── ASIN placements: product targets, not keywords ────────────────
+        # Match types (exact/phrase/broad) do not exist for product targets,
+        # so emit one suggestion per direction rather than three variants,
+        # and return before the keyword rules can fire.
+        if is_asin:
+            if cost > 5 and orders == 0:
+                conf = _confidence_negative(cost, sales, orders, clicks, acos, is_npi)
+                if self._make(row, profile_id, "negative_product_target", "negative",
+                              f"ASIN placement spent ${cost:.2f} with zero orders — "
+                              f"exclude as product target",
+                              conf):
+                    created += 1
+            if sales > 10 and acos is not None and acos < 0.30:
+                conf = _confidence_harvest(cost, sales, orders, clicks, acos, roas, cvr)
+                if self._make(row, profile_id, "product_target", "harvest",
+                              f"ASIN placement: ${sales:.2f} sales at ACOS "
+                              f"{acos*100:.1f}% — add as product target",
+                              conf):
+                    created += 1
+            return created
 
         # ── Negative rules ────────────────────────────────────────────────
         if cost > 5 and orders == 0:

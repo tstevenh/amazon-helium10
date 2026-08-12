@@ -64,13 +64,20 @@ class CampaignSyncService:
     def sync_campaigns(self, account: SellerAccount) -> dict:
         logger.warning("[svc] sync_campaigns starting for account %s", account.id)
         access_token = self._get_access_token(account)
+        # A paginated fetch can outlive its access token — the keyword fetch
+        # is 239 pages / ~5 minutes on the largest profile. Passing a
+        # refresher lets the client recover from a mid-fetch 401 rather than
+        # abandoning the remaining pages (observed twice: 11k of 233k rows).
+        def _refresh_token() -> str:
+            return self._account_svc.get_valid_access_token(account, force_refresh=True)
         profiles = self._get_profiles(account)
         logger.warning("[svc] sync_campaigns: %d profiles (parallel fetch)", len(profiles))
 
         # ── Phase 1: fetch Amazon data for all profiles in parallel ────────
         def _fetch(profile: AdsProfile) -> tuple[AdsProfile, list[dict], Optional[Exception]]:
             try:
-                raw = amazon_ads.list_campaigns(access_token, profile.amazon_profile_id)
+                raw = amazon_ads.list_campaigns(access_token, profile.amazon_profile_id,
+                                             token_getter=_refresh_token)
                 return profile, raw, None
             except PartialFetchError as exc:
                 # Keep the rows that DID arrive — they are still worth persisting.
@@ -156,13 +163,20 @@ class CampaignSyncService:
     def sync_ad_groups(self, account: SellerAccount) -> dict:
         logger.warning("[svc] sync_ad_groups starting for account %s", account.id)
         access_token = self._get_access_token(account)
+        # A paginated fetch can outlive its access token — the keyword fetch
+        # is 239 pages / ~5 minutes on the largest profile. Passing a
+        # refresher lets the client recover from a mid-fetch 401 rather than
+        # abandoning the remaining pages (observed twice: 11k of 233k rows).
+        def _refresh_token() -> str:
+            return self._account_svc.get_valid_access_token(account, force_refresh=True)
         profiles = self._get_profiles(account)
         logger.warning("[svc] sync_ad_groups: %d profiles (parallel fetch)", len(profiles))
 
         # ── Phase 1: fetch Amazon data for all profiles in parallel ────────
         def _fetch(profile: AdsProfile) -> tuple[AdsProfile, list[dict], Optional[Exception]]:
             try:
-                raw = amazon_ads.list_ad_groups(access_token, profile.amazon_profile_id)
+                raw = amazon_ads.list_ad_groups(access_token, profile.amazon_profile_id,
+                                             token_getter=_refresh_token)
                 return profile, raw, None
             except PartialFetchError as exc:
                 # Keep the rows that DID arrive — they are still worth persisting.
@@ -279,13 +293,21 @@ class CampaignSyncService:
     def sync_targets(self, account: SellerAccount) -> dict:
         logger.warning("[svc] sync_targets starting for account %s", account.id)
         access_token = self._get_access_token(account)
+        # A paginated fetch can outlive its access token — the keyword fetch
+        # is 239 pages / ~5 minutes on the largest profile. Passing a
+        # refresher lets the client recover from a mid-fetch 401 rather than
+        # abandoning the remaining pages (observed twice: 11k of 233k rows).
+        def _refresh_token() -> str:
+            return self._account_svc.get_valid_access_token(account, force_refresh=True)
         profiles = self._get_profiles(account)
         logger.warning("[svc] sync_targets: %d profiles (parallel fetch)", len(profiles))
 
         # ── Phase 1: fetch Amazon data for all profiles in parallel ────────
         def _fetch(profile: AdsProfile) -> tuple[AdsProfile, list[dict], bool, int, int, Optional[Exception]]:
             try:
-                raw, was_truncated, pages, rows = amazon_ads.list_targets(access_token, profile.amazon_profile_id)
+                raw, was_truncated, pages, rows = amazon_ads.list_targets(
+                    access_token, profile.amazon_profile_id,
+                    token_getter=_refresh_token)
                 return profile, raw, was_truncated, pages, rows, None
             except PartialFetchError as exc:
                 # Keep the rows that DID arrive. was_truncated=True marks the

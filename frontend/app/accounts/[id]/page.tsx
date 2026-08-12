@@ -183,6 +183,9 @@ export default function AccountDetailPage() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncResults, setSyncResults] = useState<SyncResults>({})
   const [syncError, setSyncError] = useState<string | null>(null)
+  // undefined = routine rolling window (3 days, or 90 on a first sync).
+  // A number forces that many days — 90 is a slow deliberate backfill.
+  const [syncDays, setSyncDays] = useState<number | undefined>(undefined)
   // DB counts loaded from /sync-status on mount — persists across navigations
   const [dbStatus, setDbStatus] = useState<SyncStatus | null>(null)
 
@@ -333,7 +336,7 @@ export default function AccountDetailPage() {
     setSyncResults({})
     setIsSyncing(true)
     try {
-      await api.syncAll(id) // 202 — backend is running in background thread
+      await api.syncAll(id, syncDays) // 202 — backend is running in background thread
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         // Already running — that's fine, just keep polling
@@ -511,6 +514,36 @@ export default function AccountDetailPage() {
             {syncError}
           </div>
         )}
+
+        <div className="mb-3 flex items-center gap-2 text-sm">
+          <span className="text-gray-500">Performance history:</span>
+          {([
+            { label: 'Routine', value: undefined, hint: 'Last 3 days — fast, keeps recent numbers fresh' },
+            { label: '7 days',  value: 7,  hint: 'About 15 minutes' },
+            { label: '30 days', value: 30, hint: 'About an hour' },
+            { label: '90 days', value: 90, hint: 'Full backfill — several hours' },
+          ] as const).map(opt => (
+            <button
+              key={opt.label}
+              type="button"
+              title={opt.hint}
+              onClick={() => setSyncDays(opt.value)}
+              disabled={isSyncing}
+              className={`px-2.5 py-1 rounded border text-xs transition-colors disabled:opacity-50 ${
+                syncDays === opt.value
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+          {syncDays === 90 && (
+            <span className="text-xs text-amber-600">
+              90 days is ~18 Amazon reports and can take several hours.
+            </span>
+          )}
+        </div>
 
         <button
           onClick={handleSyncAll}

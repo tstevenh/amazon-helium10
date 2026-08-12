@@ -1,0 +1,11 @@
+# Local development overrides. Compose applies this file automatically, so
+# `docker compose up` gives you hot reload while the base compose file stays
+# production-shaped.
+#
+# On a server, run with the base file only:
+#   docker compose -f docker-compose.yml up -d
+services:
+  frontend:
+    # The image builds a production bundle (npm run start). For local work we
+    # want the dev server and its hot reload instead.
+    command: ["npm", "run", "dev"]

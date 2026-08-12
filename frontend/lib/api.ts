@@ -12,7 +12,8 @@
 import type {
   Account, AccountDetail, AdGroup, BulkResolveResponse, Campaign,
   ConnectionTestResponse, ExecuteRuleResponse, GenerateResponse,
-  OAuthStartResponse, Profile, Rule, RuleExecution, SearchTermRow,
+  ChangeLogResponse, OAuthStartResponse, Profile, ProfileCount, Rule, RuleExecution,
+  SearchTermRow, SuggestionActionEntry,
   SearchTermSyncResponse, Suggestion, SyncAllResponse, SyncResult, SyncStatus,
   Target, TokenResponse, User,
 } from './types'
@@ -107,6 +108,36 @@ export const api = {
   getAccount: (id: string) =>
     request<AccountDetail>(`/accounts/${id}`),
 
+  /** Campaign counts per marketplace — lets the UI say WHERE the data is
+   *  instead of telling an operator to run a sync that changes nothing. */
+  // ── Execution audit (Plan 3) ────────────────────────────────────────
+  /** What actually changed on Amazon, newest first. */
+  getChangeLog: (profileId?: string, limit = 200) =>
+    request<ChangeLogResponse>(
+      `/change-log?limit=${limit}` + (profileId ? `&profile_id=${profileId}` : ''),
+    ),
+
+  /** Undo one executed change by writing its old value back to Amazon. */
+  rollbackChange: (changeId: string) =>
+    request<{ ok: boolean; change_id: string; detail: string }>(
+      `/change-log/${changeId}/rollback`, { method: 'POST' },
+    ),
+
+  /** Every execution attempt for a suggestion, with the Amazon exchange. */
+  getSuggestionActions: (suggestionId: string) =>
+    request<{ suggestion_id: string; actions: SuggestionActionEntry[] }>(
+      `/suggestions/${suggestionId}/actions`,
+    ),
+
+  /** Apply an approved suggestion to Amazon. Admin only; returns 202. */
+  executeSuggestion: (suggestionId: string) =>
+    request<{ message: string; suggestion_id: string; status: string }>(
+      `/suggestions/${suggestionId}/execute`, { method: 'POST' },
+    ),
+
+  getProfileCounts: (accountId: string) =>
+    request<ProfileCount[]>(`/accounts/${accountId}/profile-counts`),
+
   getProfiles: (accountId: string) =>
     request<Profile[]>(`/accounts/${accountId}/profiles`),
 
@@ -143,9 +174,11 @@ export const api = {
       `/accounts/${accountId}/targets/sync`,
     ),
 
-  syncAll: (accountId: string) =>
+  /** Full sync. perfDays omitted = routine 3-day rolling window (90 days
+   *  automatically on a profile's first sync). 90 is a slow backfill. */
+  syncAll: (accountId: string, perfDays?: number) =>
     syncRequest<SyncAllResponse>(
-      `/accounts/${accountId}/sync-all`,
+      `/accounts/${accountId}/sync-all` + (perfDays ? `?perf_days=${perfDays}` : ''),
     ),
 
   // ── Campaigns ────────────────────────────────────────────────────────────
@@ -356,6 +389,36 @@ export const api = {
     if (params.date_from) qs.set('date_from', params.date_from)
     if (params.date_to) qs.set('date_to', params.date_to)
     return request<import('./types').TargetWithMetrics[]>(`/performance/ad-groups/${adGroupId}/targets?${qs}`)
+  },
+
+  /** Ad groups across a profile/account, highest spend first. */
+  listAdGroupsWithMetrics: (params: {
+    date_from?: string; date_to?: string
+    profile_id?: string; account_id?: string; limit?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params.date_from) qs.set('date_from', params.date_from)
+    if (params.date_to) qs.set('date_to', params.date_to)
+    if (params.profile_id) qs.set('profile_id', params.profile_id)
+    if (params.account_id) qs.set('account_id', params.account_id)
+    if (params.limit != null) qs.set('limit', String(params.limit))
+    return request<import('./types').AdGroupWithMetrics[]>(`/performance/ad-groups?${qs}`)
+  },
+
+  /** Keywords/targets across a profile/account, highest spend first. */
+  listTargetsWithMetrics: (params: {
+    date_from?: string; date_to?: string
+    profile_id?: string; account_id?: string
+    target_kind?: string; limit?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params.date_from) qs.set('date_from', params.date_from)
+    if (params.date_to) qs.set('date_to', params.date_to)
+    if (params.profile_id) qs.set('profile_id', params.profile_id)
+    if (params.account_id) qs.set('account_id', params.account_id)
+    if (params.target_kind) qs.set('target_kind', params.target_kind)
+    if (params.limit != null) qs.set('limit', String(params.limit))
+    return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
   },
 
   syncPerformance: (accountId: string, days?: number) => {

@@ -18,6 +18,7 @@ from app.modules.search_terms.router import search_terms_router, st_sync_router
 from app.modules.suggestions.router import suggestions_router
 from app.modules.rules.router import rules_router
 from app.modules.performance.router import router as performance_router
+from app.modules.execution.router import execution_router
 
 # Make all app.* loggers visible at INFO level regardless of uvicorn's root config.
 logging.getLogger("app").setLevel(logging.INFO)
@@ -45,6 +46,7 @@ app.include_router(st_sync_router)
 app.include_router(suggestions_router)
 app.include_router(rules_router)
 app.include_router(performance_router)
+app.include_router(execution_router)
 
 # Dev-only bootstrap — registered unconditionally but the handler returns 404
 # when AMAZON_MOCK_MODE=false, so no production risk.
@@ -106,6 +108,24 @@ def _startup_checks() -> None:
                 "Register AMAZON_REDIRECT_URI=%s in your Amazon LWA app.",
                 settings.amazon_redirect_uri,
             )
+
+
+@app.get("/health/sync")
+def health_sync() -> dict:
+    """Sync freshness, for uptime monitors and the UI.
+
+    Unauthenticated so a monitor can watch it without credentials. Exposes no
+    ad data — only account ids, names and timestamps. Always returns 200;
+    read the `healthy` field rather than relying on the status code.
+    """
+    from app.database import SessionLocal
+    from app.worker.health import collect_sync_health
+
+    db = SessionLocal()
+    try:
+        return collect_sync_health(db, settings.sync_stale_after_hours)
+    finally:
+        db.close()
 
 
 @app.get("/health")

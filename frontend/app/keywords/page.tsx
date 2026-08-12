@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
-import type { Target, AdGroup, Campaign } from '@/lib/types'
+import type { TargetWithMetrics, AdGroup, Campaign } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DataTable, Column } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -13,6 +13,8 @@ import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { emptyDataMessage } from '@/lib/emptyState'
+import { metricColumns } from '@/components/ui/metricColumns'
 
 const LIMIT = 2000
 
@@ -24,11 +26,10 @@ export default function KeywordsPage() {
     currentAccount,
     accountProfileIds,
     accountsLoading,
-    profilesLoading,
-  } = useAccountProfile()
+    profilesLoading, profileCounts, setCurrentProfile } = useAccountProfile()
   const router = useRouter()
 
-  const [keywords, setKeywords] = useState<Target[]>([])
+  const [keywords, setKeywords] = useState<TargetWithMetrics[]>([])
   const [adGroups, setAdGroups] = useState<AdGroup[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [search, setSearch] = useState('')
@@ -36,7 +37,7 @@ export default function KeywordsPage() {
   const [matchFilter, setMatchFilter] = useState('all')
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [wasCapped, setWasCapped] = useState(false)
+  const [totalKeywords, setTotalKeywords] = useState(0)
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/login')
@@ -48,18 +49,23 @@ export default function KeywordsPage() {
     setError(null)
     setKeywords([])
     try {
-      const params: Parameters<typeof api.listTargets>[0] = {
-        target_kind: 'keyword',
-        limit: LIMIT,
-      }
-      if (currentProfileId) params.profile_id = currentProfileId
-      const [kws, ags, camps] = await Promise.all([
-        api.listTargets(params),
+      // Ranked by spend server-side. The old call was a bare LIMIT with no
+      // ORDER BY, so the 2,000 rows shown were an arbitrary slice of 219,285
+      // — overwhelmingly zero-traffic keywords, which is why this screen
+      // looked empty. Now the cap keeps the keywords that cost money.
+      const [kwPage, ags, camps] = await Promise.all([
+        api.listTargetsWithMetrics({
+          target_kind: 'keyword',
+          limit: LIMIT,
+          ...(currentProfileId
+            ? { profile_id: currentProfileId }
+            : { account_id: currentAccountId }),
+        }),
         api.listAdGroups(currentProfileId ? { profile_id: currentProfileId } : undefined),
         api.listCampaigns(),
       ])
-      setKeywords(kws)
-      setWasCapped(kws.length >= LIMIT)
+      setKeywords(kwPage.items)
+      setTotalKeywords(kwPage.total)
       setAdGroups(ags)
       setCampaigns(camps)
     } catch (e) {
@@ -126,7 +132,7 @@ export default function KeywordsPage() {
     },
   ]
 
-  const columns: Column<Target>[] = [
+  const columns: Column<TargetWithMetrics>[] = [
     {
       header: 'Keyword',
       cell: row => <span className="font-medium text-gray-900">{row.expression_text || '—'}</span>,
@@ -189,6 +195,7 @@ export default function KeywordsPage() {
         return ag ? campaignMap[ag.campaign_id]?.name ?? '' : ''
       },
     },
+    ...metricColumns<TargetWithMetrics>(),
   ]
 
   const isLoading = dataLoading || profilesLoading
@@ -201,12 +208,15 @@ export default function KeywordsPage() {
         subtitle={
           isLoading
             ? 'Loading…'
-            : `${filtered.length} of ${keywords.length} keyword${keywords.length !== 1 ? 's' : ''}`
+            : `${filtered.length} of ${keywords.length} keyword${keywords.length !== 1 ? 's' : ''} shown`
         }
       />
-      {wasCapped && (
-        <div className="mb-4 px-4 py-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
-          Showing first {LIMIT.toLocaleString()} keywords. Your account has more — use the search box to find specific keywords.
+      {totalKeywords > keywords.length && (
+        <div className="mb-4 px-4 py-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+          Showing the top {keywords.length.toLocaleString()} keywords by spend, out of{' '}
+          {totalKeywords.toLocaleString()}. The rest spent nothing over this period.
+          {/* The old copy said "use the search box to find specific keywords",
+              which was untrue: search only filters the rows already loaded. */}
         </div>
       )}
       <div className="card">
@@ -222,13 +232,16 @@ export default function KeywordsPage() {
         <DataTable
           columns={columns}
           rows={filtered}
+          defaultSortCol={columns.findIndex(c => c.header === 'Spend')}
+          defaultSortDir="desc"
           rowKey={r => r.id}
           loading={isLoading}
           emptyTitle="No keywords found"
           emptyDescription={
             accountProfileIds.size === 0
               ? `No profiles synced for ${accountLabel}. Run Sync All from Settings → Accounts.`
-              : `No keywords found for ${accountLabel}. Run Sync All from Settings → Accounts.`
+              : emptyDataMessage({ entity: 'keywords', profileCounts,
+                                   currentProfileId, accountName: accountLabel }).message
           }
         />
       </div>

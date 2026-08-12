@@ -64,7 +64,7 @@ are stored as NULL.
 import logging
 import time
 import urllib.parse
-from typing import Any
+from typing import Any, Callable, Optional
 
 import requests
 
@@ -479,6 +479,7 @@ def _post_list_paginated(
     initial_body: dict[str, Any],
     data_key: str,
     max_pages: int = 0,
+    token_getter: Optional[Callable[[], str]] = None,
 ) -> tuple[list[dict[str, Any]], bool, int]:
     """POST to a v3/v4 list endpoint and follow nextToken pagination.
 
@@ -503,6 +504,16 @@ def _post_list_paginated(
     was_truncated = False
     while True:
         resp = _request_with_retry("POST", url, json=body, headers=headers, timeout=30)
+
+        # A long fetch can outlive its access token. Refresh once and retry
+        # this page rather than abandoning the remaining pages — the failure
+        # mode that cost 220k rows twice on the live account.
+        if resp.status_code == 401 and token_getter is not None:
+            logger.warning("[amazon_ads] 401 on page %d of %s — refreshing token",
+                           page_count + 1, url)
+            headers = {**headers, "Authorization": f"Bearer {token_getter()}"}
+            resp = _request_with_retry("POST", url, json=body, headers=headers, timeout=30)
+
         _raise_for_amazon_error(resp)
         data = resp.json()
         items = data.get(data_key) or []
@@ -529,6 +540,7 @@ def _get_list_paginated_sb(
     base_params: dict[str, Any],
     page_size: int = 1000,
     max_pages: int = 0,
+    token_getter: Optional[Callable[[], str]] = None,
 ) -> tuple[list[dict[str, Any]], bool, int]:
     """GET from a SB endpoint using startIndex/count offset pagination.
 
@@ -545,6 +557,11 @@ def _get_list_paginated_sb(
     while True:
         params = {**base_params, "startIndex": start_index, "count": page_size}
         resp = _request_with_retry("GET", url, params=params, headers=headers, timeout=30)
+        if resp.status_code == 401 and token_getter is not None:
+            logger.warning("[amazon_ads] 401 on page %d of %s — refreshing token",
+                           page_count + 1, url)
+            headers = {**headers, "Authorization": f"Bearer {token_getter()}"}
+            resp = _request_with_retry("GET", url, params=params, headers=headers, timeout=30)
         _raise_for_amazon_error(resp)
         data = resp.json()
         # SB GET endpoints may return a plain array or a wrapped object.
@@ -780,7 +797,10 @@ def list_profiles(access_token: str) -> list[dict[str, Any]]:
 # Public API — campaign sync (v3/v4)
 # ---------------------------------------------------------------------------
 
-def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
+def list_campaigns(
+    access_token: str, profile_id: int,
+    token_getter: Optional[Callable[[], str]] = None,
+) -> list[dict[str, Any]]:
     """
     Return all campaigns (SP v3 + SB v4) for a profile in normalised form.
 
@@ -809,6 +829,7 @@ def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
         raw, _, _ = _post_list_paginated(
             f"{settings.amazon_api_base_url}/sp/campaigns/list",
             headers, body, "campaigns",
+            token_getter=token_getter,
         )
         campaigns.extend(_normalize_sp_campaign_v3(c) for c in raw)
         logger.info("[amazon_ads] SP campaigns v3 profile=%s: %d campaigns", profile_id, len(raw))
@@ -827,6 +848,7 @@ def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
         raw, _, _ = _post_list_paginated(
             f"{settings.amazon_api_base_url}/sb/v4/campaigns/list",
             headers, body, "campaigns",
+            token_getter=token_getter,
         )
         campaigns.extend(_normalize_sb_campaign_v4(c) for c in raw)
         logger.info("[amazon_ads] SB campaigns v4 profile=%s: %d campaigns", profile_id, len(raw))
@@ -844,7 +866,10 @@ def list_campaigns(access_token: str, profile_id: int) -> list[dict[str, Any]]:
     return campaigns
 
 
-def list_ad_groups(access_token: str, profile_id: int) -> list[dict[str, Any]]:
+def list_ad_groups(
+    access_token: str, profile_id: int,
+    token_getter: Optional[Callable[[], str]] = None,
+) -> list[dict[str, Any]]:
     """
     Return all ad groups (SP v3 + SB v4) for a profile in normalised form.
 
@@ -869,6 +894,7 @@ def list_ad_groups(access_token: str, profile_id: int) -> list[dict[str, Any]]:
         raw, _, _ = _post_list_paginated(
             f"{settings.amazon_api_base_url}/sp/adGroups/list",
             headers, body, "adGroups",
+            token_getter=token_getter,
         )
         ad_groups.extend(_normalize_ad_group_v3(g) for g in raw)
         logger.info("[amazon_ads] SP ad groups v3 profile=%s: %d ad groups", profile_id, len(raw))
@@ -887,6 +913,7 @@ def list_ad_groups(access_token: str, profile_id: int) -> list[dict[str, Any]]:
         raw, _, _ = _post_list_paginated(
             f"{settings.amazon_api_base_url}/sb/v4/adGroups/list",
             headers, body, "adGroups",
+            token_getter=token_getter,
         )
         ad_groups.extend(_normalize_sb_ad_group_v4(g) for g in raw)
         logger.info("[amazon_ads] SB ad groups v4 profile=%s: %d ad groups", profile_id, len(raw))
@@ -904,7 +931,10 @@ def list_ad_groups(access_token: str, profile_id: int) -> list[dict[str, Any]]:
     return ad_groups
 
 
-def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any]], bool, int, int]:
+def list_targets(
+    access_token: str, profile_id: int,
+    token_getter: Optional[Callable[[], str]] = None,
+) -> tuple[list[dict[str, Any]], bool, int, int]:
     """
     Return all keyword and product targets for a profile in normalised form.
 
@@ -941,6 +971,7 @@ def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any
         raw, kw_truncated, kw_pages = _post_list_paginated(
             f"{settings.amazon_api_base_url}/sp/keywords/list",
             headers, body, "keywords",
+            token_getter=token_getter,
             max_pages=max_pages_cap,
         )
         total_pages += kw_pages
@@ -966,6 +997,7 @@ def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any
         raw, pt_truncated, pt_pages = _post_list_paginated(
             f"{settings.amazon_api_base_url}/sp/targets/list",
             headers, body, "targetingClauses",
+            token_getter=token_getter,
             max_pages=max_pages_cap,
         )
         total_pages += pt_pages
@@ -998,6 +1030,7 @@ def list_targets(access_token: str, profile_id: int) -> tuple[list[dict[str, Any
             sb_kw_params,
             page_size=1000,
             max_pages=max_pages_cap,
+            token_getter=token_getter,
         )
         total_pages += sb_pages
         targets.extend(_normalize_sb_keyword_v3(k) for k in raw)

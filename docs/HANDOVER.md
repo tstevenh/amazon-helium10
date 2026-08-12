@@ -243,7 +243,87 @@ Files changed: `app/core/amazon_ads.py`, `app/core/amazon_reporting.py`,
 
 ---
 
-## Known limitation: syncs cannot be driven from the UI
+## ✅ RESOLVED 2026-08-05: Plan 2 complete — background worker, scheduler, alerting
+
+The limitation described below was **fixed**. All 10 Plan 2 tasks are done on
+branch `feat/background-worker` (11 commits, 80 tests passing).
+
+| | Before | After |
+|---|---|---|
+| `POST /sync-all` response time | held ~51 min | **202 + job_id in 17 ms** |
+| Job state after container restart | `{}` — forgotten | **full state intact** |
+| Concurrency guard | per-process memory | **database; survives restarts** |
+| Automatic sync | none | **every 6 hours (Celery Beat)** |
+| Failure alerting | none | **every 30 min + `/health/sync`** |
+| Report patience ceiling | 40 min | **4 hours (configurable)** |
+| Published ports | `0.0.0.0` with `ChangeMe123!` | **`127.0.0.1` only** |
+| Frontend container | `npm run dev` | **production build** |
+| Backups | none | **`scripts/backup-db.sh`, restore-tested** |
+
+New services: `redis` (broker), `worker` (Celery), `beat` (scheduler).
+Migrations `012` and `013` applied; alembic head is now `013`.
+
+### Two bugs found while verifying, not predicted by the plan
+
+**The `sync_jobs` table already had check constraints** on `status` and
+`job_type` that a truncated `\d` output had hidden. Unit tests passed while a
+real insert raised `CheckViolation`. Caught only by smoke-testing against the
+live database. Consequences:
+
+- The correct status vocabulary is `queued | running | success | failed |
+  partial` — not the `completed` the plan assumed.
+- **The original authors had included a `partial` status**, which maps exactly
+  onto Plan 1's `errors[]` contract. `mark_completed` now downgrades to
+  `partial` rather than recording an incomplete sync as a success. Their idea,
+  and better than what had been designed.
+- Migration `013` widens `ck_sync_jobs_job_type` to allow `sync_all`; the
+  original constraint enumerated one value per sync *level*.
+
+**The rules engine reintroduced the ASIN bug.** Verifying it (P2-10) showed 2
+of its 10 suggestions were `negative_exact` for ASINs. It has its own
+`_make_suggestion`, so the earlier fix in `SuggestionEngine` never covered it.
+The pattern and mapping now live in `suggestions/asin.py`, imported by both
+engines, so the two paths cannot drift apart again — which is exactly how the
+bug survived the first fix.
+
+### Rules engine: verified executing for the first time
+
+`rows_evaluated=106`, `suggestions_generated=10`, completed in 20 ms. It had
+never been run in the project's history. After the ASIN fix it emits
+`negative_product_target` for the 2 ASIN terms and `negative_exact` for the 8
+genuine queries — **0 bad rows across both engines**.
+
+### Also fixed: the frontend did not typecheck
+
+`next build` type-checks by default, so 8 pre-existing TypeScript errors would
+have blocked the production image entirely. Both causes were real:
+
+- `ErrorState` declared a prop `error` while all 7 call sites passed
+  `message`, so **actual error text was silently dropped** and users only ever
+  saw the generic "Something went wrong". Fittingly on-theme.
+- `hooks/useApi.ts` read a `token` field `AuthContextValue` does not have. It
+  was never imported anywhere — deleted as dead code.
+
+Frontend: 8 errors → 0. The account detail page needed **no changes** — it
+already polled `sync-status` and reads `sync_job.running/.error/.result`, all
+of which the backend change preserved.
+
+### Still outstanding — needs a human, not a developer
+
+**Secrets are not rotated.** `FERNET_KEY` encrypts the stored Amazon refresh
+tokens, so rotating it forces OAuth to be re-run and needs someone with the
+Amazon login present. `docs/DEPLOYMENT.md` has the required ordering. Do this
+before deploying — the current values sat in a `Downloads` folder in plaintext.
+
+**No alert webhook is configured.** `ALERT_WEBHOOK_URL` is empty, so alerts
+log at `ERROR` rather than reaching anyone. Set it to a Slack or Discord
+incoming webhook in production; no code change needed.
+
+---
+
+## Original limitation (now fixed — kept for context)
+
+### Syncs could not be driven from the UI
 
 The 4-hour poll ceiling means the server now completes work no browser can
 watch. A 30-day sync takes **51 minutes**; the Next.js proxy times out at 20
@@ -267,14 +347,103 @@ Two things Plan 2 also fixes:
 
 ---
 
+## ✅ 2026-08-06: V1 feature-complete except the gated live write
+
+Plans 3 and 4 are done. 32 commits on `feat/background-worker`, 134 tests.
+
+### The V1 loop now exists end to end
+
+| Spec workflow | Status |
+|---|---|
+| 1. Connect account → sync | ✅ |
+| 2. Browse live performance data | ✅ |
+| 3. Create a Bid Rule scoped to campaigns | ✅ |
+| 4. Daily job evaluates rules → suggestions | ✅ every 24 h |
+| 5. Inbox approve / reject / bulk | ✅ |
+| 6. Execution writes to Amazon | ✅ built, ⛔ never fired at a real bid |
+| 7. Logs show who/what/when/old→new | ✅ with an Undo button |
+
+All 7 V1 pages exist. Beat runs three schedules: sync 6 h, rules 24 h,
+health 30 min.
+
+### Safety model for writes
+
+`AMAZON_WRITE_ENABLED` defaults to **false** — with it off the write client
+raises before a request is even built. Three endpoints only (keyword bid,
+target bid, negative keyword); a test fails if anyone adds campaign creation.
+Every attempt is recorded in `suggestion_actions` *before* the call. A failed
+call writes no `change_log` row, because a row there means "this really
+changed". Rollback exists and was built before the first write, not after.
+
+Proven: the app created a paused test campaign on the live account
+(`153113201181536`) and read it back. **Changing an existing bid and undoing
+it is still unproven** — that is the one remaining step.
+
+### Bid suggestions are now executable
+
+A bid suggestion carries `target_id`, `current_value` and `suggested_value`.
+Without those the execution job had nothing to act on, which is why execution
+was impossible before. Verified live: 105 rows evaluated → 4 suggestions,
+each with a real target and bid change ($0.40 → $0.34).
+
+### Two field bugs fixed
+
+**Empty states lied.** A restored `localStorage` selection of MX — the only
+marketplace with zero campaigns — made every page say "Run Sync All to pull
+data". Two people concluded the app was broken. It now says "MX has no
+campaigns. US has 268, CA has 22." with a switch button.
+
+**Scheduled syncs would have hammered Amazon forever.** `force_full=True` was
+ported faithfully from the old daemon thread, where it was harmless because
+nothing ran on a schedule. With Beat it forced a 6–12 hour 90-day pull every
+6 hours. Now a 3-day rolling window, which is also exactly what the team
+asked for independently.
+
+---
+
+## ✅ 2026-08-12: Dashboard pass for non-engineering users
+
+Everything below was found by clicking through the app in a browser rather
+than by reading code or calling the API. Each one made the app look broken to
+someone who did not build it.
+
+| What the user saw | What was actually wrong |
+|---|---|
+| Ad Groups and Keywords showed names and bids but no money columns | The metric columns only ever existed on the Campaigns page. Added `GET /performance/ad-groups` and `GET /performance/targets`, plus `components/ui/metricColumns.tsx` so all three screens format numbers the same way. |
+| Keywords looked like a list of dead keywords | The list applied `LIMIT 2000` with **no `ORDER BY`**, so the rows shown were an arbitrary slice of 219,285 — almost all zero-traffic. Now ranked by spend in SQL. |
+| "Showing first 2,000 — use the search box to find the rest" | Untrue: search only filters rows already loaded. Now reads "top 2,000 by spend, out of 219,285". |
+| Rules said "No rules yet" despite two enabled rules | With the header on **All Profiles** the page silently queried whichever profile sorted first. Now loads every profile in the account and shows a Marketplace column; the create modal asks which marketplace instead of guessing. |
+| Campaign Manager opened on paused campaigns with dashes | No default sort. `DataTable` gained `defaultSortCol`/`defaultSortDir`; the three data screens default to Spend ↓. |
+| Sorting by any money column gave nonsense order | Numeric values arrive from the API as **strings**, so `<`/`>` compared them alphabetically — `$8.97` ranked above `$27.71`. `DataTable` now coerces before comparing. This affected every numeric column app-wide. |
+| Suggestions said "AI-generated" | They come from threshold rules the team can read and edit. Subtitle now says so. |
+
+**Worth telling whoever uses this:** in the last 30 days only **17 of the US
+profile's 219,285 keywords spent anything at all**. That is the account, not a
+sync failure — most keywords sit in paused or low-budget campaigns. Ranking by
+spend is what makes that legible instead of alarming.
+
+Guarded by `backend/tests/modules/test_perf_ranking.py` (8 tests), including
+the invariant that `LIMIT` must never appear without `ORDER BY`.
+
+---
+
 ## Recommended order of work
 
-1. **Review and merge `fix/sync-honesty`.** Plan 2's Task 4 deletes code from
-   this repo, so review this first.
-2. **Fix the ASIN harvest bug** (~1 hour). Small, and it affects most of the
-   suggestions the engine currently produces.
-3. **Plan 2** — background worker, job persistence, scheduler (3–5 days).
-4. **Then deploy to a VPS.** Pre-deployment hardening is Task 7 of Plan 2:
+1. **Review `feat/background-worker`** (11 commits) and `main` (13 commits
+   already merged). Plan 2 deleted the threading and in-memory dict your team
+   wrote, so that review matters.
+2. **Set `ALERT_WEBHOOK_URL`** to a Slack or Discord webhook (~5 minutes). No
+   code change; alerting is already built and tested.
+3. **Rotate the secrets** following `docs/DEPLOYMENT.md` (~1 hour, needs
+   someone with the Amazon login for the `FERNET_KEY` step).
+4. **Deploy to a VPS.** Hardening is done; see `docs/DEPLOYMENT.md` for TLS,
+   the OAuth redirect change and the backup cron.
+
+### Superseded — kept so the trail is legible
+
+The earlier plan of work was: merge Plan 1, fix the ASIN bug, build Plan 2,
+then deploy. Items 2 and 3 of that list are now complete. Pre-deployment
+hardening was Task 7 of Plan 2:
    bind ports to `127.0.0.1` (they are currently on `0.0.0.0` with the
    password `ChangeMe123!`), rotate every secret, and give the frontend a
    production build instead of `npm run dev`.

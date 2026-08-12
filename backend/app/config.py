@@ -39,6 +39,31 @@ class Settings(BaseSettings):
     amazon_report_poll_max_attempts: int = 1440   # 1440 x 10s = 4 hours
     amazon_report_poll_interval_sec: int = 10
 
+    # Background worker (Celery + Redis)
+    redis_url: str = "redis://redis:6379/0"
+    # Periodic full sync interval. 0 disables the schedule entirely.
+    sync_schedule_hours: int = 6
+    # How often enabled rules are evaluated. Spec workflow 4 is a daily
+    # job. 0 disables it — rules can still be run by hand.
+    rule_schedule_hours: int = 24
+
+    # ── Amazon WRITE access ────────────────────────────────────────────────
+    # Master kill-switch for every mutating Amazon Ads call. Defaults to False
+    # so no environment can change a live ad account by accident — including a
+    # fresh clone, a test run, or a misconfigured deploy. Turn on ONLY when the
+    # team has explicitly authorised writes, and turn it back off afterwards.
+    amazon_write_enabled: bool = False
+
+    # Failure alerting. POSTs JSON to this URL (Slack/Discord/n8n webhook).
+    # Empty disables delivery — send_alert() logs at ERROR and returns False.
+    # A missing alert channel must never crash the scheduler, but it must
+    # also never look like success.
+    alert_webhook_url: str = ""
+    # An account with no successful sync in this many hours is "stale".
+    # A sync that silently never runs is as damaging as one that errors.
+    sync_stale_after_hours: int = 24
+    health_check_interval_minutes: int = 30
+
     # Performance sync: how many days of history to pull on first sync.
     # Subsequent syncs (already-synced profiles) use a 3-day rolling window.
     # Amazon Ads Reporting API typically supports up to 2 years (730 days).

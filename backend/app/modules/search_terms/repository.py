@@ -124,6 +124,7 @@ class SearchTermRepository:
         profile_id: uuid.UUID,
         date_from: date,
         date_to: date,
+        campaign_ids: Optional[list[uuid.UUID]] = None,
     ) -> list[dict]:
         """Return search terms aggregated per (profile, search_term) — across all campaigns/ad groups.
 
@@ -163,6 +164,10 @@ class SearchTermRepository:
             WHERE st.profile_id = :profile_id
               AND st.date >= :date_from
               AND st.date <= :date_to
+              -- NULL campaign_ids means profile-wide, which is how every
+              -- rule behaved before scoping existed.
+              AND (:campaign_ids IS NULL
+                   OR st.campaign_id::TEXT = ANY(:campaign_ids))
             GROUP BY st.search_term
             ORDER BY SUM(st.cost) DESC
         """)
@@ -171,6 +176,7 @@ class SearchTermRepository:
             "profile_id": str(profile_id),
             "date_from": date_from,
             "date_to": date_to,
+            "campaign_ids": [str(c) for c in campaign_ids] if campaign_ids else None,
         }
         rows = self.db.execute(sql, params).mappings().all()
         return [dict(r) for r in rows]

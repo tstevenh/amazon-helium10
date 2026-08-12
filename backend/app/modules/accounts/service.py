@@ -56,7 +56,12 @@ from app.modules.auth.models import User
 logger = logging.getLogger(__name__)
 
 # How long before a token expires we proactively refresh it.
-_REFRESH_BUFFER_SECONDS = 60
+# Must exceed the duration of the longest single operation that holds one
+# token. The US profile's keyword fetch is 239 pages and takes ~5 minutes,
+# so a 60-second buffer let a token pass this check and still expire
+# mid-fetch — observed twice on the live account, costing 220k rows each
+# time (2026-08-06 16:27, 2026-08-07 19:38).
+_REFRESH_BUFFER_SECONDS = 600
 # TTL for the OAuth state JWT (Amazon has up to 10 min to redirect back).
 _STATE_TTL_MINUTES = 10
 

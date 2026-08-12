@@ -120,6 +120,13 @@ export interface SyncJob {
   completed_at: string | null
   error: string | null
   result: Record<string, unknown> | null
+  // Added when job state moved from an in-memory dict to the sync_jobs table.
+  // `running` is retained with its original meaning so existing polling works.
+  job_id: string | null
+  // queued | running | success | failed | partial
+  // 'partial' means the sync ran but Amazon returned an incomplete view.
+  status: string | null
+  records_synced: number
 }
 
 export interface SyncStatus {
@@ -328,6 +335,17 @@ export interface AdGroupWithMetrics extends AdGroup, PerfMetrics {}
 
 export interface TargetWithMetrics extends Target, PerfMetrics {}
 
+/**
+ * A page of keywords ranked by spend. `total` is the full count in the
+ * account so the screen can say "top 2,000 of 219,285" rather than pretending
+ * the cap is the whole picture.
+ */
+export interface TargetsWithMetricsPage {
+  items: TargetWithMetrics[]
+  total: number
+  limit: number
+}
+
 export interface PerfSyncResult {
   campaign_rows: number
   ad_group_rows: number
@@ -340,4 +358,47 @@ export interface PerfSyncResult {
 export interface PerfSyncResponse {
   message: string
   result: PerfSyncResult
+}
+
+/** Campaign count per marketplace, used to explain empty screens. */
+export interface ProfileCount {
+  profile_id: string
+  country_code: string | null
+  campaigns: number
+}
+
+// ── Plan 3: Execution audit ────────────────────────────────────────────────
+
+/** One row of change_log — something that really changed on Amazon. */
+export interface ChangeLogEntry {
+  id: string
+  profile_id: string
+  entity_type: string
+  entity_id: string | null
+  amazon_entity_id: number | null
+  field_changed: string
+  old_value: string | null
+  new_value: string | null
+  suggestion_id: string | null
+  changed_by: string | null
+  source: string            // suggestion_execution | manual_edit | rollback
+  rolled_back_at: string | null
+  changed_at: string | null
+}
+
+export interface ChangeLogResponse {
+  count: number
+  changes: ChangeLogEntry[]
+}
+
+/** One execution attempt, with the literal Amazon exchange. */
+export interface SuggestionActionEntry {
+  id: string
+  action: string
+  performed_by: string | null
+  notes: string | null
+  amazon_api_request: Record<string, unknown> | null
+  amazon_api_response: Record<string, unknown> | null
+  amazon_api_status_code: number | null
+  created_at: string | null
 }

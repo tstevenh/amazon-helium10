@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
-import type { AdGroup, Campaign } from '@/lib/types'
+import type { AdGroupWithMetrics, Campaign } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DataTable, Column } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -13,6 +13,8 @@ import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { emptyDataMessage } from '@/lib/emptyState'
+import { metricColumns } from '@/components/ui/metricColumns'
 
 export default function AdGroupsPage() {
   const { user, loading: authLoading } = useAuth()
@@ -22,11 +24,10 @@ export default function AdGroupsPage() {
     currentAccount,
     accountProfileIds,
     accountsLoading,
-    profilesLoading,
-  } = useAccountProfile()
+    profilesLoading, profileCounts, setCurrentProfile } = useAccountProfile()
   const router = useRouter()
 
-  const [adGroups, setAdGroups] = useState<AdGroup[]>([])
+  const [adGroups, setAdGroups] = useState<AdGroupWithMetrics[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -43,8 +44,14 @@ export default function AdGroupsPage() {
     setError(null)
     setAdGroups([])
     try {
+      // Metrics endpoint, not the bare list: an ad group without spend,
+      // sales and ACOS tells a PPC manager nothing about what to do next.
       const [ags, camps] = await Promise.all([
-        api.listAdGroups(currentProfileId ? { profile_id: currentProfileId } : undefined),
+        api.listAdGroupsWithMetrics(
+          currentProfileId
+            ? { profile_id: currentProfileId }
+            : { account_id: currentAccountId },
+        ),
         api.listCampaigns(),
       ])
       setAdGroups(ags)
@@ -104,7 +111,7 @@ export default function AdGroupsPage() {
     },
   ]
 
-  const columns: Column<AdGroup>[] = [
+  const columns: Column<AdGroupWithMetrics>[] = [
     {
       header: 'Ad Group',
       cell: row => <span className="font-medium text-gray-900">{row.name}</span>,
@@ -148,6 +155,7 @@ export default function AdGroupsPage() {
       ),
       sortValue: row => row.default_bid ?? 0,
     },
+    ...metricColumns<AdGroupWithMetrics>(),
   ]
 
   const isLoading = dataLoading || profilesLoading
@@ -176,6 +184,8 @@ export default function AdGroupsPage() {
         <DataTable
           columns={columns}
           rows={filtered}
+          defaultSortCol={columns.findIndex(c => c.header === 'Spend')}
+          defaultSortDir="desc"
           rowKey={r => r.id}
           onRowClick={r => router.push(`/ad-groups/${r.id}`)}
           loading={isLoading}
@@ -183,7 +193,8 @@ export default function AdGroupsPage() {
           emptyDescription={
             accountProfileIds.size === 0
               ? `No profiles synced for ${accountLabel}. Run Sync All from Settings → Accounts.`
-              : `No ad groups found for ${accountLabel}. Run Sync All from Settings → Accounts.`
+              : emptyDataMessage({ entity: 'ad groups', profileCounts,
+                                   currentProfileId, accountName: accountLabel }).message
           }
         />
       </div>

@@ -156,6 +156,78 @@ def get_campaign_ad_groups_with_metrics(
     return result
 
 
+# ── Profile-wide listings (ranked by spend) ───────────────────────────────
+#
+# The Ad Groups and Keywords screens previously listed names with no metrics
+# at all, and the keyword list was capped at 2,000 rows with no ORDER BY — an
+# arbitrary 2,000 out of 231,799. These two endpoints return the same shape
+# plus metrics, highest spend first, so a capped page shows the rows a PPC
+# manager actually needs to look at.
+
+def _resolve_profile_ids(
+    db: Session,
+    profile_id: Optional[str],
+    account_id: Optional[str],
+) -> list[str]:
+    if profile_id:
+        return [profile_id]
+    if account_id:
+        return [str(p.id) for p in AdsProfileRepository(db).get_by_account(uuid.UUID(account_id))]
+    return []
+
+
+@router.get("/ad-groups")
+def get_ad_groups_with_metrics(
+    date_from: Optional[date] = Query(None),
+    date_to:   Optional[date] = Query(None),
+    profile_id: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None),
+    limit: int = Query(2000, le=10000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not date_from or not date_to:
+        date_from, date_to = _default_dates()
+    profile_ids = _resolve_profile_ids(db, profile_id, account_id)
+    if not profile_ids:
+        return []
+    return PerformanceRepository(db).top_ad_groups_by_spend(
+        profile_ids, date_from, date_to, limit=limit,
+    )
+
+
+@router.get("/targets")
+def get_targets_with_metrics(
+    date_from: Optional[date] = Query(None),
+    date_to:   Optional[date] = Query(None),
+    profile_id: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None),
+    target_kind: Optional[str] = Query(None),
+    limit: int = Query(2000, le=10000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Keywords/product targets + metrics, highest spend first.
+
+    Returns an envelope rather than a bare list so the UI can say
+    "showing the top 2,000 of 231,799 by spend" instead of implying the
+    account only has 2,000 keywords.
+    """
+    if not date_from or not date_to:
+        date_from, date_to = _default_dates()
+    profile_ids = _resolve_profile_ids(db, profile_id, account_id)
+    if not profile_ids:
+        return {"items": [], "total": 0, "limit": limit}
+    repo = PerformanceRepository(db)
+    return {
+        "items": repo.top_targets_by_spend(
+            profile_ids, date_from, date_to, target_kind=target_kind, limit=limit,
+        ),
+        "total": repo.count_targets(profile_ids, target_kind=target_kind),
+        "limit": limit,
+    }
+
+
 # ── Ad group endpoints ────────────────────────────────────────────────────
 
 @router.get("/ad-groups/{ad_group_id}/summary")

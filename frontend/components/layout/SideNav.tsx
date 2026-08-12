@@ -25,6 +25,7 @@ const MAIN_MODULES: NavItem[] = [
   { label: 'Search Terms',     href: '/search-terms', icon: '🔍' },
   { label: 'Suggestions',      href: '/suggestions', icon: '💡' },
   { label: 'Rules',            href: '/rules',      icon: '⚙️' },
+  { label: 'Logs',             href: '/logs',       icon: '📜' },
 ]
 
 const SETTINGS_MODULES: NavItem[] = [

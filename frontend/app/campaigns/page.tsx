@@ -13,6 +13,7 @@ import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { emptyDataMessage } from '@/lib/emptyState'
 
 // ── Date range helpers ─────────────────────────────────────────────────────
 
@@ -45,8 +46,7 @@ export default function CampaignsPage() {
   const { user, loading: authLoading } = useAuth()
   const {
     currentAccountId, currentProfileId, currentAccount,
-    profiles, accountProfileIds, accountsLoading, profilesLoading,
-  } = useAccountProfile()
+    profiles, accountProfileIds, accountsLoading, profilesLoading, profileCounts, setCurrentProfile } = useAccountProfile()
   const router = useRouter()
 
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([])
@@ -117,6 +117,22 @@ export default function CampaignsPage() {
     return matchSearch && matchStatus && matchType
   }), [contextFiltered, search, statusFilter, adProductFilter])
 
+  // Totals for the rows currently shown. Derived from `filtered` rather than
+  // fetched separately, so the strip can never disagree with the table.
+  const kpis = useMemo(() => {
+    const sum = (pick: (r: typeof filtered[number]) => number | null | undefined) =>
+      filtered.reduce((acc, r) => acc + (Number(pick(r)) || 0), 0)
+    const spend  = sum(r => r.spend)
+    const sales  = sum(r => r.sales)
+    const clicks = sum(r => r.clicks)
+    const orders = sum(r => r.orders)
+    return {
+      spend, sales, clicks, orders,
+      acos: sales > 0 ? (spend / sales) * 100 : null,
+      roas: spend > 0 ? sales / spend : null,
+    }
+  }, [filtered])
+
   if (authLoading || accountsLoading) return <LoadingState message="Loading…" />
   if (!user) return null
   if (error) return <ErrorState message={error} onRetry={() => load(dateFrom, dateTo)} />
@@ -150,6 +166,7 @@ export default function CampaignsPage() {
       ],
     },
   ]
+
 
   const columns: Column<CampaignWithMetrics>[] = [
     {
@@ -270,6 +287,24 @@ export default function CampaignsPage() {
         </div>
       </div>
 
+      {/* KPI strip — the spec says this replaces a standalone Dashboard in V1.
+          Totals come from `filtered`, so they always match the table below. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+        {[
+          { label: 'Spend',  value: fmt.currency(kpis.spend) },
+          { label: 'Sales',  value: fmt.currency(kpis.sales) },
+          { label: 'ACOS',   value: kpis.acos == null ? '—' : `${kpis.acos.toFixed(1)}%` },
+          { label: 'ROAS',   value: kpis.roas == null ? '—' : `${kpis.roas.toFixed(2)}×` },
+          { label: 'Clicks', value: kpis.clicks.toLocaleString() },
+          { label: 'Orders', value: kpis.orders.toLocaleString() },
+        ].map(k => (
+          <div key={k.label} className="rounded-xl border border-gray-200 bg-white p-3.5">
+            <p className="text-xs text-gray-500 truncate">{k.label}</p>
+            <p className="text-xl font-bold text-gray-900 mt-1 truncate">{k.value}</p>
+          </div>
+        ))}
+      </div>
+
       <div className="card overflow-x-auto">
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <SearchBox
@@ -281,6 +316,11 @@ export default function CampaignsPage() {
           <FilterBar filters={filters} />
         </div>
         <DataTable
+          // Open on highest spend: a PPC operator wants the campaigns
+          // costing money first, not paused ones with no data. Computed
+          // from the header so reordering columns cannot break it.
+          defaultSortCol={columns.findIndex(c => c.header === 'Spend')}
+          defaultSortDir="desc"
           columns={columns}
           rows={filtered}
           rowKey={r => r.id}
@@ -290,7 +330,8 @@ export default function CampaignsPage() {
           emptyDescription={
             accountProfileIds.size === 0
               ? `No profiles synced for ${currentAccount?.name ?? 'this account'}.`
-              : 'No campaigns found. Run Sync All from Accounts to pull data.'
+              : emptyDataMessage({ entity: 'campaigns', profileCounts,
+                                   currentProfileId, accountName: currentAccount?.name }).message
           }
         />
       </div>
