@@ -28,6 +28,7 @@ const MAIN_MODULES: NavItem[] = [
   { label: 'Suggestions',      href: '/suggestions', icon: '💡' },
   { label: 'Rules',            href: '/rules',      icon: '⚙️' },
   { label: 'Dayparting',       href: '/dayparting', icon: '🕐' },
+  { label: 'Keyword Intel',    href: '/keyword-intel', icon: '🧠' },
   { label: 'Logs',             href: '/logs',       icon: '📜' },
 ]
 

@@ -53,8 +53,12 @@ async function request<T>(
   explicitToken?: string | null,
 ): Promise<T> {
   const token = explicitToken !== undefined ? explicitToken : getStoredToken()
+  // FormData must set its own Content-Type: the browser appends the multipart
+  // boundary, and forcing application/json here makes the server reject the
+  // upload with a confusing 422 about a missing file field.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
   const res = await fetch(`${BASE}${path}`, { ...options, headers })
@@ -420,6 +424,44 @@ export const api = {
     if (params.limit != null) qs.set('limit', String(params.limit))
     return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
   },
+
+  // ── Keyword Intelligence ────────────────────────────────────────────────
+
+  kiStats: () => request<import('./types').KiStats>('/keyword-intel/stats'),
+
+  /** Parse without saving — step 1 of the two-step import. */
+  kiInspect: (file: File, sourceType = 'cerebro') => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('source_type', sourceType)
+    return request<import('./types').KiInspectResult>('/keyword-intel/inspect', {
+      method: 'POST', body: form,
+    })
+  },
+
+  kiImport: (file: File, snapshotDate: string, asins: string[], sourceType = 'cerebro') => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('source_type', sourceType)
+    form.append('snapshot_date', snapshotDate)
+    form.append('asins', asins.join(','))
+    return request<{ id: string; row_count: number; status: string; snapshot_date: string }>(
+      '/keyword-intel/snapshots', { method: 'POST', body: form },
+    )
+  },
+
+  kiSnapshots: () => request<import('./types').KiSnapshot[]>('/keyword-intel/snapshots'),
+
+  kiDeleteSnapshot: (id: string) =>
+    request<void>(`/keyword-intel/snapshots/${id}`, { method: 'DELETE' }),
+
+  kiSearchKeywords: (q: string) =>
+    request<import('./types').KiKeywordHit[]>(`/keyword-intel/keywords?q=${encodeURIComponent(q)}`),
+
+  kiKeywordTrend: (id: string, asin?: string) =>
+    request<import('./types').KiTrendPoint[]>(
+      `/keyword-intel/keywords/${id}/trend` + (asin ? `?asin=${encodeURIComponent(asin)}` : ''),
+    ),
 
   // ── Notifications ───────────────────────────────────────────────────────
 

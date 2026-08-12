@@ -516,3 +516,66 @@ export interface DigestPreview {
   body: string
   data: Record<string, unknown>
 }
+
+// ── Keyword Intelligence ──────────────────────────────────────────────────
+
+export interface KiStats {
+  snapshots: number
+  keywords: number
+  metrics: number
+  asins: number
+  first_date: string | null
+  last_date: string | null
+}
+
+export interface KiInspectResult {
+  row_count: number
+  detected_asins: string[]
+  recognised_columns: Record<string, string>
+  ignored_columns: string[]
+  warnings: string[]
+  file_hash: string
+  duplicate_of: {
+    id: string
+    uploaded_at: string
+    snapshot_date: string
+    filename: string | null
+  } | null
+  filename: string | null
+}
+
+export interface KiSnapshot {
+  id: string
+  source_type: string
+  snapshot_date: string
+  uploaded_at: string
+  original_filename: string | null
+  row_count: number
+  status: string
+  error_message: string | null
+  asins: string[]
+  uploaded_by_name: string | null
+}
+
+export interface KiKeywordHit {
+  id: string
+  keyword_text: string
+  snapshot_count: number
+  latest_search_volume: number | null
+  asin_count: number
+}
+
+export interface KiTrendPoint {
+  snapshot_date: string
+  source_type: string
+  asin: string | null
+  search_volume: number | null
+  search_volume_trend_pct: string | null
+  organic_rank: number | null
+  sponsored_rank: number | null
+  competing_products_count: number | null
+  sponsored_asins_count: number | null
+  cpc: string | null
+  title_density: number | null
+  estimated_sales: number | null
+}
