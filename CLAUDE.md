@@ -52,7 +52,7 @@ limitation — see "Unit tests do not touch the database" below.
 ```bash
 docker compose exec api alembic upgrade head
 docker compose exec api alembic revision -m "description"
-docker compose exec api alembic heads      # current: 015
+docker compose exec api alembic heads      # current: 018
 ```
 
 `backend/alembic/` is bind-mounted. It did not used to be, and new migration
@@ -72,11 +72,15 @@ proxy, so all API calls are same-origin.
 ### Where the money-touching code lives
 
 `backend/app/core/amazon_ads_write.py` is **the only module permitted to
-mutate Amazon**, and it exposes exactly three operations: update keyword
-bids, update target bids, create negative keywords. There is no
-create-campaign and no delete anywhere in the app; `scripts/create_test_campaign.py`
-is deliberately a standalone script outside the app so the write client can
-never gain that capability.
+mutate Amazon**, and it exposes exactly four operations: update keyword bids,
+update target bids, create negative keywords, and set campaign state
+(pause/enable, for dayparting only).
+
+There is no create and no delete anywhere in the app.
+`scripts/create_test_campaign.py` is deliberately a standalone script outside
+the app so the write client can never gain that capability. `ARCHIVED` is
+refused by `update_campaign_state` before the kill-switch is even consulted,
+because Amazon cannot un-archive a campaign.
 
 Two invariants that are easy to break and expensive to get wrong:
 
@@ -103,6 +107,7 @@ Celery + Redis, prefork pool (the codebase is synchronous SQLAlchemy).
 | `enqueue_scheduled_syncs` | 6h | `sync_schedule_hours` |
 | `evaluate_all_rules` | 24h | `rule_schedule_hours` |
 | `check_sync_health` | 30min | `health_check_interval_minutes` |
+| `reconcile_dayparting` | 60min | `dayparting_interval_minutes` |
 
 **`docker compose restart` does not re-read `.env`.** It restarts the
 container with the environment it was created with, so a changed setting
