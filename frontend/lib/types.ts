@@ -402,3 +402,35 @@ export interface SuggestionActionEntry {
   amazon_api_status_code: number | null
   created_at: string | null
 }
+
+// ── User management (admin only) ───────────────────────────────────────────
+
+export interface ManagedUser {
+  id: string
+  email: string
+  name: string
+  role: 'admin' | 'user'
+  is_active: boolean
+  created_at: string
+}
+
+// ── Sync monitor ──────────────────────────────────────────────────────────
+
+export interface SyncJobRow {
+  id: string
+  job_type: string
+  seller_account_id: string
+  /** queued | running | success | partial | failed — matches the DB CHECK. */
+  status: string
+  records_synced: number
+  error_message: string | null
+  created_at: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface SyncJobsPage {
+  stale_after_hours: number
+  schedule_hours: number
+  jobs: SyncJobRow[]
+}

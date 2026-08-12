@@ -110,3 +110,14 @@ class SyncJobRepository:
             .count()
             > 0
         )
+
+    def recent(self, limit: int = 50, account_id: uuid.UUID | None = None) -> list[SyncJob]:
+        """Most recent jobs first — what the Sync Monitor screen renders.
+
+        Failures used to be visible only by querying this table by hand, which
+        is how eight consecutive failed syncs went unnoticed for a week.
+        """
+        q = self.db.query(SyncJob)
+        if account_id is not None:
+            q = q.filter(SyncJob.seller_account_id == account_id)
+        return q.order_by(SyncJob.created_at.desc()).limit(limit).all()

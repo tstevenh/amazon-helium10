@@ -14,6 +14,8 @@ interface NavItem {
   href: string
   icon: string   // emoji stand-in; replace with SVG icons in a later sprint
   badge?: string // e.g. "Soon"
+  /** Hidden entirely for non-admins — they cannot call the endpoints anyway. */
+  adminOnly?: boolean
   disabled?: boolean
 }
 
@@ -30,6 +32,8 @@ const MAIN_MODULES: NavItem[] = [
 
 const SETTINGS_MODULES: NavItem[] = [
   { label: 'Accounts', href: '/accounts', icon: '🏪' },
+  { label: 'Sync Monitor', href: '/sync-monitor', icon: '🩺' },
+  { label: 'Users',    href: '/users',    icon: '👥', adminOnly: true },
 ]
 
 function NavLink({ item }: { item: NavItem }) {
@@ -92,9 +96,11 @@ export function SideNav() {
           Settings
         </p>
         <nav className="space-y-0.5">
-          {SETTINGS_MODULES.map(item => (
-            <NavLink key={item.href} item={item} />
-          ))}
+          {SETTINGS_MODULES
+            .filter(item => !item.adminOnly || user.role === 'admin')
+            .map(item => (
+              <NavLink key={item.href} item={item} />
+            ))}
         </nav>
       </div>
     </aside>

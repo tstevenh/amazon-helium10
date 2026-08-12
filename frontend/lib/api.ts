@@ -421,6 +421,32 @@ export const api = {
     return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
   },
 
+  listSyncJobs: (params?: { limit?: number; account_id?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit != null) qs.set('limit', String(params.limit))
+    if (params?.account_id) qs.set('account_id', params.account_id)
+    return request<import('./types').SyncJobsPage>(`/sync-jobs?${qs}`)
+  },
+
+  // ── Users (admin only) ──────────────────────────────────────────────────
+
+  listUsers: () => request<import('./types').ManagedUser[]>('/auth/users'),
+
+  createUser: (body: { email: string; name: string; password: string; role: string }) =>
+    request<import('./types').ManagedUser>('/auth/users', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
+
+  updateUser: (id: string, body: { name?: string; role?: string; is_active?: boolean }) =>
+    request<import('./types').ManagedUser>(`/auth/users/${id}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+
+  resetUserPassword: (id: string, password: string) =>
+    request<void>(`/auth/users/${id}/password`, {
+      method: 'POST', body: JSON.stringify({ password }),
+    }),
+
   syncPerformance: (accountId: string, days?: number) => {
     const qs = new URLSearchParams()
     qs.set('account_id', accountId)
