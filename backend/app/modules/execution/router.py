@@ -104,10 +104,16 @@ def list_change_log(
     q = db.query(ChangeLog)
     if profile_id:
         q = q.filter(ChangeLog.profile_id == profile_id)
+    # The TOTAL, not len(rows). "count" used to mean "rows in this page", so a
+    # caller fetching with limit=1 to be cheap — as the Dashboard tile does —
+    # was told there had been 1 change to the account when there were 2.
+    # A field named count has to mean the count.
+    total = q.count()
     rows = q.order_by(ChangeLog.changed_at.desc()).limit(limit).all()
 
     return JSONResponse(content={
-        "count": len(rows),
+        "count": total,
+        "returned": len(rows),
         "changes": [{
             "id": str(r.id),
             "profile_id": str(r.profile_id),

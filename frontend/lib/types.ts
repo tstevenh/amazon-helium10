@@ -391,7 +391,10 @@ export interface ChangeLogEntry {
 }
 
 export interface ChangeLogResponse {
+  /** Total matching rows, independent of `limit`. */
   count: number
+  /** How many rows this response actually carries. */
+  returned?: number
   changes: ChangeLogEntry[]
 }
 

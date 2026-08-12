@@ -685,6 +685,11 @@ def normalise_placement(raw: Any) -> str:
     """Map Amazon's placement label onto the spec's vocabulary."""
     key = str(raw or "").strip().lower()
     if not key:
+        # Amazon returns rows with no placementClassification — 44 of 219 on
+        # this account's first pull. Logged like any other unmapped value:
+        # burying the empty case while warning about unrecognised strings made
+        # the more surprising of the two invisible.
+        logger.warning("[reporting] placementClassification is empty -> 'other'")
         return "other"
     if key in _PLACEMENT_MAP:
         return _PLACEMENT_MAP[key]
