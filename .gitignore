@@ -16,3 +16,6 @@ frontend/.next/
 
 # OS
 .DS_Store
+
+# TypeScript incremental build cache — machine-specific, not source
+*.tsbuildinfo
