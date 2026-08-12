@@ -16,12 +16,13 @@ import { useAuth } from '@/context/AuthContext'
 import { api, ApiError } from '@/lib/api'
 import type {
   KiStats, KiSnapshot, KiInspectResult, KiKeywordHit, KiTrendPoint,
+  OpportunityBundle,
 } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 
-type Tab = 'import' | 'history' | 'trends'
+type Tab = 'import' | 'history' | 'trends' | 'opportunities'
 
 export default function KeywordIntelPage() {
   const { user, loading: authLoading } = useAuth()
@@ -105,7 +106,8 @@ export default function KeywordIntelPage() {
       )}
 
       <div className="flex gap-1 border-b border-gray-200">
-        {([['trends', 'Keyword Trends'], ['import', 'Import Snapshot'], ['history', 'Snapshot History']] as const)
+        {([['trends', 'Keyword Trends'], ['opportunities', 'Opportunities'],
+           ['import', 'Import Snapshot'], ['history', 'Snapshot History']] as const)
           .map(([key, label]) => (
             <button
               key={key}
@@ -124,6 +126,7 @@ export default function KeywordIntelPage() {
       {tab === 'import' && <ImportPanel onImported={m => { notify(m); loadStats(); setTab('history') }} />}
       {tab === 'history' && <HistoryPanel onChanged={loadStats} notify={notify} />}
       {tab === 'trends' && <TrendsPanel />}
+      {tab === 'opportunities' && <OpportunitiesPanel />}
     </div>
   )
 }
@@ -504,6 +507,131 @@ function TrendsPanel() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+
+// ── Opportunities (Phase 3) ───────────────────────────────────────────────
+
+/**
+ * The spec's five patterns (§17.5). Three need at least three snapshots to
+ * mean anything; two work from one. That distinction is shown rather than
+ * hidden, because an empty list with no explanation reads as a broken screen.
+ */
+function OpportunitiesPanel() {
+  const [data, setData]       = useState<OpportunityBundle | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr]         = useState<string | null>(null)
+
+  useEffect(() => {
+    api.kiOpportunities()
+      .then(setData)
+      .catch(e => setErr(e instanceof ApiError ? e.message : 'Failed to load'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="card text-center py-12 text-gray-400">Loading…</div>
+  if (err) return <div className="card text-center py-12 text-red-600">{err}</div>
+  if (!data) return null
+
+  const needed = data.min_snapshots_for_trends
+  const counts = Object.entries(data.snapshot_counts_by_asin)
+
+  const sections: { key: keyof OpportunityBundle; title: string; blurb: string; trend: boolean }[] = [
+    { key: 'missing_from_ppc', trend: false,
+      title: 'Keywords you are not bidding on',
+      blurb: 'Healthy search volume in your imported data, with no matching keyword in any campaign.' },
+    { key: 'missing_from_listings', trend: false,
+      title: 'Keywords missing from your listing copy',
+      blurb: 'Not found in the title, bullets or backend keywords you have entered for that ASIN.' },
+    { key: 'volume_increasing', trend: true,
+      title: 'Search volume climbing',
+      blurb: 'Comparing your first and latest snapshot, not Amazon’s own trend column.' },
+    { key: 'rank_declining', trend: true,
+      title: 'Slipping organically',
+      blurb: 'Your organic position got worse between the last two snapshots.' },
+    { key: 'competition_increasing', trend: true,
+      title: 'Getting more crowded',
+      blurb: 'More competing products than last snapshot — a defensive bid candidate.' },
+  ]
+
+  return (
+    <div className="space-y-4">
+      {!data.trends_available && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          <span className="font-medium">
+            Trend-based opportunities need {needed} snapshots per ASIN.
+          </span>{' '}
+          {counts.length === 0
+            ? 'Nothing has been imported yet'
+            : counts.map(([asin, n]) => `${asin}: ${n}`).join(' · ')}
+          . The first two sections below work from a single snapshot, so they are
+          useful straight away.
+        </div>
+      )}
+
+      {sections.map(sec => {
+        const rows = (data[sec.key] as Record<string, unknown>[]) ?? []
+        const blocked = sec.trend && !data.trends_available
+        return (
+          <div key={String(sec.key)} className="card">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm">{sec.title}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{sec.blurb}</p>
+              </div>
+              <span className="text-xs text-gray-400 shrink-0">
+                {blocked ? `needs ${needed} snapshots` : `${rows.length} found`}
+              </span>
+            </div>
+
+            {blocked ? (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                Not enough history yet — this is not an error.
+              </p>
+            ) : rows.length === 0 ? (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                Nothing matched. That is a good result for this one.
+              </p>
+            ) : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      {Object.keys(rows[0])
+                        .filter(k => k !== 'keyword_id')
+                        .map(k => (
+                          <th key={k} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                            {k.replace(/_/g, ' ')}
+                          </th>
+                        ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {rows.slice(0, 25).map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        {Object.entries(r)
+                          .filter(([k]) => k !== 'keyword_id')
+                          .map(([k, v]) => (
+                            <td key={k} className="px-3 py-2 text-gray-800">
+                              {v == null ? '—' : String(v)}
+                            </td>
+                          ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {rows.length > 25 && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Showing 25 of {rows.length}.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

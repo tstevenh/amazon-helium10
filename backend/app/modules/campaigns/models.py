@@ -38,6 +38,10 @@ class Campaign(Base):
     start_date = Column(Date(), nullable=True)
     end_date = Column(Date(), nullable=True)
     bidding_strategy = Column(String(50), nullable=True)
+    # Placement bid multipliers currently set on Amazon (migration 022), so a
+    # placement suggestion can show current -> proposed rather than only the
+    # new value.
+    placement_bidding = Column(JSONB(), nullable=True)
     raw_payload = Column(JSONB(), nullable=True)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)  # migration 007
