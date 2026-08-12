@@ -401,6 +401,32 @@ asked for independently.
 
 ---
 
+## ✅ 2026-08-12: Dashboard pass for non-engineering users
+
+Everything below was found by clicking through the app in a browser rather
+than by reading code or calling the API. Each one made the app look broken to
+someone who did not build it.
+
+| What the user saw | What was actually wrong |
+|---|---|
+| Ad Groups and Keywords showed names and bids but no money columns | The metric columns only ever existed on the Campaigns page. Added `GET /performance/ad-groups` and `GET /performance/targets`, plus `components/ui/metricColumns.tsx` so all three screens format numbers the same way. |
+| Keywords looked like a list of dead keywords | The list applied `LIMIT 2000` with **no `ORDER BY`**, so the rows shown were an arbitrary slice of 219,285 — almost all zero-traffic. Now ranked by spend in SQL. |
+| "Showing first 2,000 — use the search box to find the rest" | Untrue: search only filters rows already loaded. Now reads "top 2,000 by spend, out of 219,285". |
+| Rules said "No rules yet" despite two enabled rules | With the header on **All Profiles** the page silently queried whichever profile sorted first. Now loads every profile in the account and shows a Marketplace column; the create modal asks which marketplace instead of guessing. |
+| Campaign Manager opened on paused campaigns with dashes | No default sort. `DataTable` gained `defaultSortCol`/`defaultSortDir`; the three data screens default to Spend ↓. |
+| Sorting by any money column gave nonsense order | Numeric values arrive from the API as **strings**, so `<`/`>` compared them alphabetically — `$8.97` ranked above `$27.71`. `DataTable` now coerces before comparing. This affected every numeric column app-wide. |
+| Suggestions said "AI-generated" | They come from threshold rules the team can read and edit. Subtitle now says so. |
+
+**Worth telling whoever uses this:** in the last 30 days only **17 of the US
+profile's 219,285 keywords spent anything at all**. That is the account, not a
+sync failure — most keywords sit in paused or low-budget campaigns. Ranking by
+spend is what makes that legible instead of alarming.
+
+Guarded by `backend/tests/modules/test_perf_ranking.py` (8 tests), including
+the invariant that `LIMIT` must never appear without `ORDER BY`.
+
+---
+
 ## Recommended order of work
 
 1. **Review `feat/background-worker`** (11 commits) and `main` (13 commits
