@@ -41,6 +41,10 @@ def evaluate_all_rules() -> dict:
         for rule in rules:
             try:
                 result = engine.execute(rule, actor_id)
+                # Commit per rule, not once at the end: the failure branch
+                # below rolls back, which would otherwise discard the work of
+                # every rule that already succeeded in this pass.
+                db.commit()
                 evaluated += 1
                 suggestions += result.get("suggestions_generated", 0)
             except Exception as exc:
