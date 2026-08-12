@@ -23,7 +23,7 @@ const MAIN_MODULES: NavItem[] = [
   { label: 'Campaign Manager', href: '/campaigns',  icon: '📊' },
   { label: 'Ad Groups',        href: '/ad-groups',  icon: '🗂️' },
   { label: 'Keywords',         href: '/keywords',   icon: '🔑' },
-  { label: 'Dashboard',        href: '/dashboard',  icon: '🏠', badge: 'Soon', disabled: true },
+  { label: 'Dashboard',        href: '/dashboard',  icon: '🏠' },
   { label: 'Search Terms',     href: '/search-terms', icon: '🔍' },
   { label: 'Suggestions',      href: '/suggestions', icon: '💡' },
   { label: 'Rules',            href: '/rules',      icon: '⚙️' },
