@@ -34,6 +34,8 @@ const TYPE_LABELS: Record<string, string> = {
   bid_increase:    'Bid ↑',
   budget_decrease: 'Budget ↓',
   budget_increase: 'Budget ↑',
+  placement_decrease: 'Placement ↓',
+  placement_increase: 'Placement ↑',
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -46,6 +48,8 @@ const TYPE_COLORS: Record<string, string> = {
   bid_increase:    'bg-blue-100 text-blue-700',
   budget_decrease: 'bg-blue-100 text-blue-800',
   budget_increase: 'bg-cyan-100 text-cyan-800',
+  placement_decrease: 'bg-teal-100 text-teal-800',
+  placement_increase: 'bg-teal-100 text-teal-700',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -559,7 +563,7 @@ export default function SuggestionsPage() {
 
           {/* Kind — includes 'bid' for Sprint 3 */}
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-            {(['all', 'negative', 'harvest', 'bid', 'budget'] as const).map(k => (
+            {(['all', 'negative', 'harvest', 'bid', 'budget', 'placement'] as const).map(k => (
               <button key={k} onClick={() => setKindTab(k)}
                 className={`px-3 py-2 capitalize transition-colors ${
                   kindTab === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'

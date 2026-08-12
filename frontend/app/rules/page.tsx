@@ -29,6 +29,7 @@ const RULE_TYPE_LABELS: Record<string, string> = {
   harvest:  'Harvest',
   bid:      'Bid Adjustment',
   budget:   'Budget',
+  placement: 'Placement',
 }
 
 const RULE_TYPE_COLORS: Record<string, string> = {
@@ -36,6 +37,7 @@ const RULE_TYPE_COLORS: Record<string, string> = {
   harvest:  'bg-green-100 text-green-700',
   bid:      'bg-purple-100 text-purple-700',
   budget:   'bg-blue-100 text-blue-700',
+  placement: 'bg-teal-100 text-teal-700',
 }
 
 const EXEC_STATUS_COLORS: Record<string, string> = {
@@ -84,6 +86,10 @@ const SUGGESTION_TYPES: Record<string, { value: string; label: string }[]> = {
     { value: 'budget_decrease', label: 'Decrease Daily Budget' },
     { value: 'budget_increase', label: 'Increase Daily Budget' },
   ],
+  placement: [
+    { value: 'placement_increase', label: 'Raise Placement Bid Adjustment' },
+    { value: 'placement_decrease', label: 'Lower Placement Bid Adjustment' },
+  ],
 }
 
 const LOOKBACK_OPTIONS = [
@@ -122,6 +128,10 @@ function defaultConfig(ruleType: string): RuleConfiguration {
     action:
       ruleType === 'bid'    ? { type: 'decrease_bid', percent: 10 }
       : ruleType === 'budget' ? { type: 'decrease_budget', percent: 20 }
+      // Placement defaults to RAISING, unlike bid and budget. A placement
+      // adjustment starts at 0% for every campaign, so the only move available
+      // on a fresh account is upward.
+      : ruleType === 'placement' ? { type: 'increase_placement', percent: 25 }
       : undefined,
   }
 }
@@ -452,10 +462,14 @@ function RuleModal({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Rule Type</label>
+                {/* Driven by RULE_TYPE_LABELS rather than hardcoded, so adding a
+                    rule type cannot leave the picker behind again. Budget rules
+                    shipped unreachable this way: the engine and the suggestion
+                    types were done, but this list still had three entries. */}
                 <select value={ruleType} onChange={e => handleTypeChange(e.target.value)} className="input w-full">
-                  <option value="negative">Negative</option>
-                  <option value="harvest">Harvest</option>
-                  <option value="bid">Bid Adjustment</option>
+                  {Object.keys(SUGGESTION_TYPES).map(t => (
+                    <option key={t} value={t}>{RULE_TYPE_LABELS[t] ?? t}</option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -612,6 +626,51 @@ function RuleModal({
                   campaigns started in the last 3 days — Amazon needs about 72 hours
                   before a new campaign&apos;s numbers mean anything. Amazon&apos;s minimum
                   daily budget is $1.00; a cut that would go below it is skipped.
+                </p>
+              </div>
+            )}
+
+            {/* Placement action — only for placement rules */}
+            {ruleType === 'placement' && (
+              <div className="p-3 bg-teal-50 rounded-lg border border-teal-200">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Placement Bid Adjustment
+                </label>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={config.action?.type ?? 'increase_placement'}
+                    onChange={e => setConfig(c => ({
+                      ...c,
+                      suggestion_type: e.target.value === 'increase_placement'
+                        ? 'placement_increase' : 'placement_decrease',
+                      action: { ...c.action, type: e.target.value as 'increase_placement' | 'decrease_placement', percent: c.action?.percent ?? 25 },
+                    }))}
+                    className="input text-sm py-1.5 flex-1"
+                  >
+                    <option value="increase_placement">Raise adjustment</option>
+                    <option value="decrease_placement">Lower adjustment</option>
+                  </select>
+                  <span className="text-sm text-gray-600">by</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="900"
+                    value={config.action?.percent ?? 25}
+                    onChange={e => setConfig(c => ({
+                      ...c,
+                      action: { ...c.action!, percent: parseFloat(e.target.value) || 25 },
+                    }))}
+                    className="input text-sm py-1.5 w-20"
+                  />
+                  <span className="text-sm text-gray-600">points</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Amazon&apos;s placement setting is a percentage uplift on your keyword
+                  bid, from 0% to 900%. This adds or subtracts percentage
+                  <span className="font-medium"> points</span> — 0% raised by 25 becomes
+                  25%. Placement rules read whole-placement totals per campaign,
+                  so check the Placements screen first to see which spots are
+                  worth paying more for.
                 </p>
               </div>
             )}

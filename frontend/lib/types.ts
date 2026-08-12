@@ -239,7 +239,7 @@ export interface BulkResolveResponse {
 
 // ── Sprint 3: Rules Engine ─────────────────────────────────────────────────
 
-export type RuleType   = 'negative' | 'harvest' | 'bid'
+export type RuleType   = 'negative' | 'harvest' | 'bid' | 'budget' | 'placement'
 export type RuleStatus = 'enabled'  | 'disabled'
 export type ExecStatus = 'running'  | 'completed' | 'failed'
 
@@ -251,7 +251,11 @@ export interface RuleCondition {
 
 /** The percentage change a bid or budget rule applies when it matches. */
 export interface RuleAction {
-  type:    'increase_bid' | 'decrease_bid' | 'increase_budget' | 'decrease_budget'
+  type:
+    | 'increase_bid' | 'decrease_bid'
+    | 'increase_budget' | 'decrease_budget'
+    /** Placement adjustments move in percentage POINTS, not percentages. */
+    | 'increase_placement' | 'decrease_placement'
   percent: number
 }
 
@@ -634,4 +638,23 @@ export interface OpportunityBundle {
   competition_increasing: Record<string, unknown>[]
   missing_from_ppc: Record<string, unknown>[]
   missing_from_listings: Record<string, unknown>[]
+}
+
+/** One keyword where a competitor ranks and you do not, or ranks better. */
+export interface KeywordGap {
+  keyword_id: string
+  keyword_text: string
+  my_rank: number | null
+  competitor_rank: number | null
+  search_volume: number | null
+  /** not_ranking = you are invisible; outranked = you both rank, they win */
+  gap_type: 'not_ranking' | 'outranked'
+}
+
+export interface CompareResult {
+  my_asin: string
+  competitor_asin: string
+  gaps: KeywordGap[]
+  not_ranking: number
+  outranked: number
 }

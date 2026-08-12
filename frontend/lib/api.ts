@@ -449,7 +449,7 @@ export const api = {
     ),
 
   kiCompare: (myAsin: string, competitorAsin: string) =>
-    request<Record<string, unknown>>(
+    request<import('./types').CompareResult>(
       `/keyword-intel/compare?my_asin=${encodeURIComponent(myAsin)}` +
       `&competitor_asin=${encodeURIComponent(competitorAsin)}`,
     ),

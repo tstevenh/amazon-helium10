@@ -170,6 +170,8 @@ class RuleEngine:
             # a budget belongs to a campaign, and no search term has one.
             if rule.rule_type == "budget":
                 rows = self._campaign_rows(rule, date_from, scoped_ids)
+            elif rule.rule_type == "placement":
+                rows = self._placement_rows(rule, date_from, scoped_ids)
             else:
                 rows = self.st_repo.get_aggregated_by_term(
                     profile_id   = rule.profile_id,
@@ -185,11 +187,12 @@ class RuleEngine:
 
             for row in rows:
                 if self._matches(row, conds, logic):
-                    made = (
-                        self._make_budget_suggestion(row, rule, sugg_type, action)
-                        if rule.rule_type == "budget"
-                        else self._make_suggestion(row, rule, sugg_type, action)
-                    )
+                    if rule.rule_type == "budget":
+                        made = self._make_budget_suggestion(row, rule, sugg_type, action)
+                    elif rule.rule_type == "placement":
+                        made = self._make_placement_suggestion(row, rule, sugg_type, action)
+                    else:
+                        made = self._make_suggestion(row, rule, sugg_type, action)
                     if made:
                         created_count += 1
 
@@ -497,6 +500,217 @@ class RuleEngine:
             suggested_value  = {"budget": new_budget},
             suggestion_type  = suggestion_type,
             kind             = "budget",
+            reason           = reason,
+            metrics_snapshot = snap,
+            status           = "pending",
+            confidence_score = _rule_confidence(row, conds, logic),
+            campaign_count   = 1,
+            ad_group_count   = 1,
+            total_spend      = row.get("cost")  or Decimal("0"),
+            total_sales      = row.get("sales") or Decimal("0"),
+            total_orders     = int(row.get("orders") or 0),
+            source_type      = "rule",
+            source_rule_id   = rule.id,
+            source_rule_name = rule.name,
+        ))
+        return True
+
+    # ── Placement rules ────────────────────────────────────────────────────
+    #
+    # Amazon lets you bid a PERCENTAGE UPLIFT per placement (0-900), not an
+    # absolute bid. So a placement suggestion changes a multiplier, and the
+    # meaningful unit is percentage POINTS: "top of search 0% -> 25%".
+    #
+    # The multipliers live on campaigns.placement_bidding, synced from Amazon.
+    # A campaign we have never seen adjustments for is treated as 0 across the
+    # board, which is Amazon's default.
+
+    _PLACEMENT_TYPES = {"placement_increase", "placement_decrease"}
+
+    # Only these three can carry an adjustment. 'other' exists in the
+    # performance table for rows Amazon sent without a label, and must never
+    # become a suggestion — there is no placement to adjust.
+    _ADJUSTABLE_PLACEMENTS = ("top_of_search", "product_pages", "rest_of_search")
+
+    # Amazon's ceiling.
+    _MAX_PLACEMENT_ADJUSTMENT = 900
+
+    _PLACEMENT_LABELS = {
+        "top_of_search": "Top of search",
+        "product_pages": "Product pages",
+        "rest_of_search": "Rest of search",
+    }
+
+    @staticmethod
+    def current_placement_adjustments(campaign) -> dict[str, float]:
+        """Adjustments currently set on Amazon, defaulting to 0.
+
+        placement_bidding is stored as Amazon returns it, which may be a list of
+        {placement, percentage} or a dict. Both shapes are accepted because this
+        is synced data and Amazon has changed it before.
+        """
+        raw = getattr(campaign, "placement_bidding", None)
+        out = {p: 0.0 for p in RuleEngine._ADJUSTABLE_PLACEMENTS}
+        if not raw:
+            return out
+
+        amazon_to_ours = {
+            "PLACEMENT_TOP": "top_of_search",
+            "PLACEMENT_PRODUCT_PAGE": "product_pages",
+            "PLACEMENT_REST_OF_SEARCH": "rest_of_search",
+        }
+
+        entries = raw if isinstance(raw, list) else raw.get("placementBidding", [])
+        if isinstance(entries, dict):
+            entries = [{"placement": k, "percentage": v} for k, v in entries.items()]
+        for e in entries or []:
+            if not isinstance(e, dict):
+                continue
+            name = amazon_to_ours.get(e.get("placement"), e.get("placement"))
+            if name in out:
+                try:
+                    out[name] = float(e.get("percentage") or 0)
+                except (TypeError, ValueError):
+                    continue
+        return out
+
+    def _placement_rows(
+        self, rule: Rule, date_from: date, scoped_ids: list
+    ) -> list[dict]:
+        """One row per campaign x placement, shaped like any other rule row."""
+        from app.modules.performance.repository import PerformanceRepository
+
+        campaigns = (
+            self.db.query(Campaign)
+            .filter(Campaign.profile_id == rule.profile_id,
+                    Campaign.deleted_at.is_(None))
+            .all()
+        )
+        if scoped_ids:
+            wanted = set(scoped_ids)
+            campaigns = [c for c in campaigns if c.id in wanted]
+        if not campaigns:
+            return []
+
+        by_campaign = PerformanceRepository(self.db).placement_summary(
+            [str(c.id) for c in campaigns], date_from, date.today(),
+        )
+
+        rows: list[dict] = []
+        for c in campaigns:
+            placements = by_campaign.get(str(c.id)) or {}
+            for placement, m in placements.items():
+                if placement not in self._ADJUSTABLE_PLACEMENTS:
+                    continue
+                rows.append({
+                    "campaign_id":     c.id,
+                    "ad_group_id":     None,
+                    # placement_summary already returns acos as a RATIO, unlike
+                    # get_all_campaigns_summary — see the 100x unit bug in
+                    # tests/modules/test_budget_rules.py. No conversion here.
+                    "acos":            m["acos"],
+                    "roas":            m["roas"],
+                    "search_term":     f"{c.name} · {self._PLACEMENT_LABELS[placement]}",
+                    "impressions":     m["impressions"],
+                    "clicks":          m["clicks"],
+                    "cost":            Decimal(str(m["spend"])),
+                    "sales":           Decimal(str(m["sales"])),
+                    "orders":          m["orders"],
+                    "ctr":             (Decimal(m["clicks"]) / Decimal(m["impressions"])
+                                        if m["impressions"] else Decimal(0)),
+                    "conversion_rate": (Decimal(m["orders"]) / Decimal(m["clicks"])
+                                        if m["clicks"] else Decimal(0)),
+                    "campaign_count":  1,
+                    "ad_group_count":  1,
+                    "_campaign":       c,
+                    "_placement":      placement,
+                })
+        return rows
+
+    def _resolve_placement_change(
+        self, row: dict, suggestion_type: str, action: Optional[dict]
+    ) -> Optional[tuple]:
+        """Returns (campaign, placement, current_pct, new_pct) or None."""
+        if suggestion_type not in self._PLACEMENT_TYPES:
+            return None
+        campaign = row.get("_campaign")
+        placement = row.get("_placement")
+        if campaign is None or placement not in self._ADJUSTABLE_PLACEMENTS:
+            return None
+
+        points = float((action or {}).get("percent", 20))
+        current = self.current_placement_adjustments(campaign)[placement]
+
+        # Percentage POINTS, not a percentage of the current value: going from
+        # 0% by "20% of 0" would never move, and Amazon's own UI works in points.
+        new_pct = current + points if suggestion_type == "placement_increase" \
+            else current - points
+        new_pct = round(max(0.0, min(float(self._MAX_PLACEMENT_ADJUSTMENT), new_pct)), 2)
+
+        # Already at the floor or ceiling: nothing to suggest.
+        if abs(new_pct - current) < 0.01:
+            return None
+
+        return campaign, placement, current, new_pct
+
+    def _make_placement_suggestion(
+        self,
+        row: dict,
+        rule: Rule,
+        suggestion_type: str,
+        action: Optional[dict],
+    ) -> bool:
+        resolved = self._resolve_placement_change(row, suggestion_type, action)
+        if resolved is None:
+            return False
+        campaign, placement, current, new_pct = resolved
+
+        # search_term is "Campaign · Placement", so the pre-existing
+        # uq_suggestion_pending_profile_term_type index gives us one pending
+        # suggestion per campaign per placement for free.
+        if self.sugg_repo.pending_exists(
+            rule.profile_id, row["search_term"], suggestion_type
+        ):
+            return False
+
+        config = rule.configuration_json or {}
+        conds  = config.get("conditions", [])
+        logic  = config.get("logic", "AND")
+        verb   = "raise" if suggestion_type == "placement_increase" else "lower"
+        reason = self._build_reason(rule, action, row)
+        reason = (
+            f"{reason} — {verb} {self._PLACEMENT_LABELS[placement]} bid adjustment "
+            f"{current:.0f}% → {new_pct:.0f}%"
+            if reason else
+            f"{verb} {self._PLACEMENT_LABELS[placement]} bid adjustment "
+            f"{current:.0f}% → {new_pct:.0f}%"
+        )
+
+        snap = {
+            "impressions":     row.get("impressions", 0),
+            "clicks":          row.get("clicks", 0),
+            "cost":            str(row.get("cost", 0)),
+            "sales":           str(row.get("sales", 0)),
+            "orders":          row.get("orders", 0),
+            "acos":            str(row["acos"]) if row.get("acos") is not None else None,
+            "roas":            str(row["roas"]) if row.get("roas") is not None else None,
+            "ctr":             str(row.get("ctr", 0)),
+            "conversion_rate": str(row.get("conversion_rate", 0)),
+        }
+
+        self.sugg_repo.create(dict(
+            profile_id       = rule.profile_id,
+            campaign_id      = campaign.id,
+            ad_group_id      = None,
+            search_term      = row["search_term"],
+            target_id        = None,
+            # The executor needs the placement name AND the full current set,
+            # because Amazon replaces the placementBidding array wholesale.
+            current_value    = {"placement": placement, "adjustment": current,
+                                "all_adjustments": self.current_placement_adjustments(campaign)},
+            suggested_value  = {"placement": placement, "adjustment": new_pct},
+            suggestion_type  = suggestion_type,
+            kind             = "placement",
             reason           = reason,
             metrics_snapshot = snap,
             status           = "pending",

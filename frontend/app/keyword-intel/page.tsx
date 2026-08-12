@@ -16,13 +16,13 @@ import { useAuth } from '@/context/AuthContext'
 import { api, ApiError } from '@/lib/api'
 import type {
   KiStats, KiSnapshot, KiInspectResult, KiKeywordHit, KiTrendPoint,
-  OpportunityBundle,
+  OpportunityBundle, CompareResult,
 } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 
-type Tab = 'import' | 'history' | 'trends' | 'opportunities'
+type Tab = 'import' | 'history' | 'trends' | 'opportunities' | 'compare'
 
 export default function KeywordIntelPage() {
   const { user, loading: authLoading } = useAuth()
@@ -107,6 +107,7 @@ export default function KeywordIntelPage() {
 
       <div className="flex gap-1 border-b border-gray-200">
         {([['trends', 'Keyword Trends'], ['opportunities', 'Opportunities'],
+           ['compare', 'Compare Competitor'],
            ['import', 'Import Snapshot'], ['history', 'Snapshot History']] as const)
           .map(([key, label]) => (
             <button
@@ -127,6 +128,7 @@ export default function KeywordIntelPage() {
       {tab === 'history' && <HistoryPanel onChanged={loadStats} notify={notify} />}
       {tab === 'trends' && <TrendsPanel />}
       {tab === 'opportunities' && <OpportunitiesPanel />}
+      {tab === 'compare' && <ComparePanel />}
     </div>
   )
 }
@@ -632,6 +634,173 @@ function OpportunitiesPanel() {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+
+// ── Competitor comparison (Phase 3) ───────────────────────────────────────
+
+/**
+ * Keyword gap against one competitor ASIN.
+ *
+ * The catch worth stating up front: this compares two ASINs using data YOU
+ * imported, so it needs a Cerebro export run against the competitor's ASIN —
+ * not yours. Without that, there is nothing to compare and the screen would
+ * look broken rather than under-supplied.
+ */
+function ComparePanel() {
+  const [mine, setMine] = useState('')
+  const [theirs, setTheirs] = useState('')
+  const [known, setKnown] = useState<string[]>([])
+  const [result, setResult] = useState<CompareResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  // Offer the ASINs actually present in imported snapshots, so nobody types an
+  // ASIN we have no data for and reads the empty result as a bug.
+  useEffect(() => {
+    api.kiOpportunities()
+      .then(d => setKnown(Object.keys(d.snapshot_counts_by_asin)))
+      .catch(() => setKnown([]))
+  }, [])
+
+  async function run(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true); setErr(null); setResult(null)
+    try {
+      setResult(await api.kiCompare(mine.trim(), theirs.trim()))
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : 'Comparison failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <h2 className="font-semibold text-gray-900 text-sm">Compare against a competitor</h2>
+        <p className="text-xs text-gray-500 mt-0.5 mb-3">
+          Finds keywords where they rank and you do not, or where they outrank you.
+          Needs a Cerebro export covering <span className="font-medium">their</span> ASIN —
+          run Cerebro against their listing, then import it.
+        </p>
+
+        <form onSubmit={run} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Your ASIN</label>
+            <input
+              value={mine}
+              onChange={e => setMine(e.target.value.toUpperCase())}
+              placeholder="B0XXXXXXXX"
+              className="input w-full font-mono text-sm"
+              required
+              minLength={8}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Competitor ASIN</label>
+            <input
+              value={theirs}
+              onChange={e => setTheirs(e.target.value.toUpperCase())}
+              placeholder="B0YYYYYYYY"
+              className="input w-full font-mono text-sm"
+              required
+              minLength={8}
+            />
+          </div>
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? 'Comparing…' : 'Compare'}
+          </button>
+        </form>
+
+        {known.length > 0 && (
+          <p className="text-xs text-gray-400 mt-2">
+            ASINs you have imported data for: {known.join(', ')}
+          </p>
+        )}
+        {known.length === 0 && (
+          <p className="text-xs text-yellow-700 mt-2">
+            No snapshots imported yet, so any comparison will come back empty.
+          </p>
+        )}
+      </div>
+
+      {err && (
+        <div className="card text-sm text-red-700">{err}</div>
+      )}
+
+      {result && (
+        <div className="card">
+          <div className="flex items-center gap-4 flex-wrap mb-3">
+            <div>
+              <p className="text-xs text-gray-500">You are invisible for</p>
+              <p className="text-2xl font-bold text-red-600">{result.not_ranking}</p>
+              <p className="text-xs text-gray-400">keywords they rank for</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">They outrank you on</p>
+              <p className="text-2xl font-bold text-yellow-700">{result.outranked}</p>
+              <p className="text-xs text-gray-400">keywords you both rank for</p>
+            </div>
+            <p className="text-xs text-gray-400 ml-auto font-mono">
+              {result.my_asin} vs {result.competitor_asin}
+            </p>
+          </div>
+
+          {result.gaps.length === 0 ? (
+            <p className="text-sm text-gray-400 py-6 text-center">
+              No gaps found. Either you are ahead everywhere, or there is no
+              imported snapshot covering {result.competitor_asin}.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Keyword</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Search volume</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Your rank</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Their rank</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Gap</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {result.gaps.slice(0, 100).map(g => (
+                    <tr key={g.keyword_id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 text-gray-900">{g.keyword_text}</td>
+                      <td className="px-3 py-2 text-right text-gray-700">
+                        {g.search_volume?.toLocaleString() ?? '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {g.my_rank == null
+                          ? <span className="text-red-600">not ranking</span>
+                          : <span className="text-gray-800">{g.my_rank}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-800">{g.competitor_rank}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                          g.gap_type === 'not_ranking'
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {g.gap_type === 'not_ranking' ? 'invisible' : 'outranked'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {result.gaps.length > 100 && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Showing 100 of {result.gaps.length}, highest search volume first.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

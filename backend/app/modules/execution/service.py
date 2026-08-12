@@ -49,6 +49,7 @@ STATUS_EXECUTION_FAILED = "execution_failed"
 _BID_TYPES = {"bid_increase", "bid_decrease", "bid_change"}
 _NEGATIVE_TYPES = {"negative_exact", "negative_phrase"}
 _BUDGET_TYPES = {"budget_increase", "budget_decrease"}
+_PLACEMENT_TYPES = {"placement_increase", "placement_decrease"}
 
 
 class ExecutionService:
@@ -122,6 +123,9 @@ class ExecutionService:
         if stype in _BUDGET_TYPES:
             return self._execute_budget(suggestion, performed_by)
 
+        if stype in _PLACEMENT_TYPES:
+            return self._execute_placement(suggestion, performed_by)
+
         if stype not in _BID_TYPES:
             # Negatives and product targets need their own execution paths;
             # refuse rather than pretend, so nothing is marked executed that
@@ -129,7 +133,7 @@ class ExecutionService:
             return self._fail(
                 suggestion, performed_by,
                 f"Suggestion type '{stype}' is not executable yet. "
-                f"Supported: {sorted(_BID_TYPES | _BUDGET_TYPES)}.",
+                f"Supported: {sorted(_BID_TYPES | _BUDGET_TYPES | _PLACEMENT_TYPES)}.",
             )
 
         target = (
@@ -327,6 +331,133 @@ class ExecutionService:
         return {"ok": True, "suggestion_id": str(suggestion.id),
                 "status": STATUS_EXECUTED,
                 "detail": f"daily budget {old_budget} -> {new_budget}"}
+
+
+    # ── Placement execution ────────────────────────────────────────────────
+
+    def _execute_placement(
+        self, suggestion: Suggestion, performed_by: uuid.UUID
+    ) -> dict[str, Any]:
+        """Apply an approved placement bid adjustment.
+
+        THE IMPORTANT PART: Amazon replaces the placementBidding array
+        wholesale. Sending only the placement being changed silently resets the
+        other two to 0%. So the full set is always sent — the stored current
+        adjustments, with only the target placement altered.
+        """
+        campaign = (
+            self.db.query(Campaign).filter(Campaign.id == suggestion.campaign_id).one_or_none()
+            if suggestion.campaign_id else None
+        )
+        if campaign is None:
+            return self._fail(suggestion, performed_by,
+                              "Suggestion has no campaign_id — nothing to change.")
+
+        suggested = suggestion.suggested_value or {}
+        current = suggestion.current_value or {}
+        placement = suggested.get("placement") or current.get("placement")
+        new_pct = suggested.get("adjustment")
+        if placement is None or new_pct is None:
+            return self._fail(
+                suggestion, performed_by,
+                "Suggestion is missing the placement or its new adjustment.",
+            )
+
+        from app.modules.rules.service import RuleEngine
+
+        # Re-read from the campaign rather than trusting the snapshot: someone
+        # may have changed adjustments in Amazon's console since this was
+        # suggested, and clobbering that silently would be worse than failing.
+        live = RuleEngine.current_placement_adjustments(campaign)
+        snapshot = current.get("all_adjustments") or {}
+        drifted = [
+            p for p, v in snapshot.items()
+            if abs(float(v) - float(live.get(p, 0))) > 0.01
+        ]
+        if drifted:
+            return self._fail(
+                suggestion, performed_by,
+                f"Placement adjustments changed on Amazon since this was "
+                f"suggested ({', '.join(drifted)}). Re-run the rule for a fresh "
+                f"suggestion.",
+            )
+
+        old_pct = float(live.get(placement, 0))
+        to_send = {p: float(v) for p, v in live.items()}
+        to_send[placement] = float(new_pct)
+
+        try:
+            profile, account = self._context(suggestion)
+        except ValueError as exc:
+            return self._fail(suggestion, performed_by, str(exc))
+
+        request_preview = {"campaignId": str(campaign.amazon_campaign_id),
+                           "placementBidding": to_send}
+
+        self.repo.record_attempt(
+            suggestion.id, ACTION_EXECUTED, performed_by=performed_by,
+            request=request_preview,
+            notes=f"attempting {placement} adjustment {old_pct} -> {new_pct} on "
+                  f"campaign {campaign.amazon_campaign_id} "
+                  f"(sending all {len(to_send)} placements)",
+        )
+
+        try:
+            token = self._account_svc.get_valid_access_token(account)
+            result = amazon_ads_write.update_campaign_placement_bidding(
+                token, profile.amazon_profile_id,
+                campaign.amazon_campaign_id, to_send,
+            )
+        except AmazonWriteDisabled as exc:
+            return self._fail(suggestion, performed_by, str(exc), request=request_preview)
+        except Exception as exc:
+            return self._fail(suggestion, performed_by,
+                              f"{type(exc).__name__}: {exc}", request=request_preview)
+
+        if not result.get("ok"):
+            return self._fail(
+                suggestion, performed_by, "Amazon rejected the change",
+                request=result.get("request"), response=result.get("response"),
+                status_code=result.get("status_code"),
+            )
+
+        self.repo.record_change(
+            profile_id=profile.id,
+            entity_type=ENTITY_CAMPAIGN,
+            field_changed=f"placement_bid_{placement}",
+            old_value=str(old_pct),
+            new_value=str(new_pct),
+            source=SOURCE_SUGGESTION_EXECUTION,
+            entity_id=campaign.id,
+            amazon_entity_id=campaign.amazon_campaign_id,
+            suggestion_id=suggestion.id,
+            changed_by=performed_by,
+        )
+        self.repo.record_attempt(
+            suggestion.id, ACTION_EXECUTED, performed_by=performed_by,
+            request=result.get("request"), response=result.get("response"),
+            status_code=result.get("status_code"), notes="confirmed by Amazon",
+        )
+
+        suggestion.status = STATUS_EXECUTED
+        suggestion.executed_at = datetime.now(tz.utc)
+        # Mirror locally in Amazon's own shape, so a later read parses the same
+        # way as synced data.
+        campaign.placement_bidding = [
+            {"placement": {"top_of_search": "PLACEMENT_TOP",
+                           "product_pages": "PLACEMENT_PRODUCT_PAGE",
+                           "rest_of_search": "PLACEMENT_REST_OF_SEARCH"}[p],
+             "percentage": v}
+            for p, v in to_send.items()
+        ]
+        self.db.commit()
+
+        logger.warning("[execution] suggestion %s EXECUTED: campaign %s %s %s -> %s",
+                       suggestion.id, campaign.amazon_campaign_id, placement,
+                       old_pct, new_pct)
+        return {"ok": True, "suggestion_id": str(suggestion.id),
+                "status": STATUS_EXECUTED,
+                "detail": f"{placement} adjustment {old_pct}% -> {new_pct}%"}
 
 
 class RollbackService:
