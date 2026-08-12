@@ -19,6 +19,7 @@ import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
 import type {
   Rule, RuleExecution, ExecuteRuleResponse, RuleConfiguration, RuleCondition,
+  Profile,
 } from '@/lib/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -273,15 +274,24 @@ function RuleModal({
   mode,
   initial,
   profileId,
+  profiles,
   onSave,
   onClose,
 }: {
   mode: FormMode
-  initial?: Rule
+  /** '' when the header is on "All Profiles" — the user must then pick one. */
   profileId: string
+  initial?: Rule
+  profiles: Profile[]
   onSave: (rule: Rule) => void
   onClose: () => void
 }) {
+  // A rule lives in exactly one marketplace. Never guess it: creating a US
+  // rule against the CA profile would run it on the wrong account's data.
+  const [pickedProfile, setPickedProfile] = useState(
+    initial?.profile_id ?? profileId ?? ''
+  )
+  const mustPickProfile = mode === 'create' && !profileId
   const [name,        setName]        = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [ruleType,    setRuleType]    = useState<string>(initial?.rule_type ?? 'negative')
@@ -322,6 +332,7 @@ function RuleModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) { setError('Name is required'); return }
+    if (!pickedProfile) { setError('Choose a marketplace for this rule'); return }
     if (config.conditions.length === 0) { setError('Add at least one condition'); return }
     if (!config.suggestion_type) { setError('Select a suggestion type'); return }
 
@@ -330,7 +341,7 @@ function RuleModal({
     try {
       let saved: Rule
       const payload = {
-        profile_id:         profileId,
+        profile_id:         pickedProfile,
         name:               name.trim(),
         description:        description.trim() || null,
         rule_type:          ruleType,
@@ -372,6 +383,32 @@ function RuleModal({
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
           <div className="px-6 py-5 space-y-5">
+            {/* Marketplace — only when the header can't tell us which one */}
+            {mustPickProfile && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Marketplace <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={pickedProfile}
+                  onChange={e => setPickedProfile(e.target.value)}
+                  className="input w-full"
+                  required
+                >
+                  <option value="">Choose a marketplace…</option>
+                  {profiles.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.country_code ?? p.marketplace_code}
+                      {p.currency_code ? ` – ${p.currency_code}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  A rule only sees data from the marketplace it belongs to.
+                </p>
+              </div>
+            )}
+
             {/* Name */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
@@ -558,7 +595,7 @@ export default function RulesPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const {
-    currentAccountId, currentProfileId, accountProfileIds,
+    currentAccountId, currentProfileId, accountProfileIds, profiles,
     accountsLoading, profilesLoading,
   } = useAccountProfile()
 
@@ -586,25 +623,37 @@ export default function RulesPage() {
     if (!authLoading && !user) router.push('/login')
   }, [authLoading, user, router])
 
-  const profileId = currentProfileId ?? Array.from(accountProfileIds)[0] ?? ''
+  // Rules belong to one marketplace. With "All Profiles" selected there is no
+  // single profile to query, and the old code silently picked whichever profile
+  // happened to be first — so two real US rules rendered as "No rules yet".
+  // Load every profile in the account instead and label each row.
+  const profileId = currentProfileId ?? ''
+  const hasAnyProfile = accountProfileIds.size > 0
+  const profileIdsKey = useMemo(
+    () => Array.from(accountProfileIds).sort().join(','),
+    [accountProfileIds],
+  )
 
   const load = useCallback(async () => {
-    if (!profileId || accountsLoading || profilesLoading) return
+    if (!hasAnyProfile || accountsLoading || profilesLoading) return
+    const targets = currentProfileId ? [currentProfileId] : Array.from(accountProfileIds)
     setLoading(true)
     setError(null)
     try {
-      const data = await api.listRules(profileId)
-      setRules(data)
+      const batches = await Promise.all(targets.map(pid => api.listRules(pid)))
+      setRules(batches.flat())
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Failed to load rules')
     } finally {
       setLoading(false)
     }
-  }, [profileId, accountsLoading, profilesLoading])
+    // accountProfileIds is a fresh Set each render; profileIdsKey is the stable value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProfileId, profileIdsKey, hasAnyProfile, accountsLoading, profilesLoading])
 
   useEffect(() => {
-    if (user && !accountsLoading && !profilesLoading && profileId) load()
-  }, [user, accountsLoading, profilesLoading, profileId, load])
+    if (user && !accountsLoading && !profilesLoading && hasAnyProfile) load()
+  }, [user, accountsLoading, profilesLoading, hasAnyProfile, load])
 
   function showToast(msg: string, isErr = false) {
     if (isErr) { setToastErr(msg); setTimeout(() => setToastErr(null), 4000) }
@@ -694,7 +743,17 @@ export default function RulesPage() {
   }), [rules])
 
   const noContext  = !accountsLoading && !currentAccountId
-  const noProfiles = !profilesLoading && currentAccountId && !profileId
+  const noProfiles = !profilesLoading && currentAccountId && !hasAnyProfile
+
+  /** 'US', 'CA' … for the Marketplace column. */
+  const profileLabel = useCallback((pid: string) => {
+    const p = profiles.find(x => x.id === pid)
+    return p ? (p.country_code ?? p.marketplace_code) : '—'
+  }, [profiles])
+
+  // Only meaningful when the header is on "All Profiles"; otherwise every row
+  // is the same marketplace and the column is noise.
+  const showMarketplaceCol = !currentProfileId && profiles.length > 1
 
   return (
     <div className="space-y-5">
@@ -763,6 +822,9 @@ export default function RulesPage() {
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Name</th>
+                {showMarketplaceCol && (
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-24">Marketplace</th>
+                )}
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-28">Type</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-20">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-28">Creates</th>
@@ -773,9 +835,9 @@ export default function RulesPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={showMarketplaceCol ? 8 : 7} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
               ) : rules.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center">
+                <tr><td colSpan={showMarketplaceCol ? 8 : 7} className="px-4 py-16 text-center">
                   <div className="text-gray-400 mb-3 text-base">No rules yet</div>
                   <button
                     onClick={() => setModalMode('create')}
@@ -805,6 +867,13 @@ export default function RulesPage() {
                         </div>
                       )}
                     </td>
+                    {showMarketplaceCol && (
+                      <td className="px-4 py-3">
+                        <span className="text-xs font-medium text-gray-600 bg-gray-100 rounded px-2 py-0.5">
+                          {profileLabel(rule.profile_id)}
+                        </span>
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${RULE_TYPE_COLORS[rule.rule_type] ?? 'bg-gray-100 text-gray-600'}`}>
                         {RULE_TYPE_LABELS[rule.rule_type] ?? rule.rule_type}
@@ -895,6 +964,7 @@ export default function RulesPage() {
           mode={modalMode}
           initial={editRule}
           profileId={profileId}
+          profiles={profiles}
           onSave={handleSaved}
           onClose={() => { setModalMode(null); setEditRule(undefined) }}
         />

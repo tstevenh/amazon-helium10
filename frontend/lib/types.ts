@@ -335,6 +335,17 @@ export interface AdGroupWithMetrics extends AdGroup, PerfMetrics {}
 
 export interface TargetWithMetrics extends Target, PerfMetrics {}
 
+/**
+ * A page of keywords ranked by spend. `total` is the full count in the
+ * account so the screen can say "top 2,000 of 219,285" rather than pretending
+ * the cap is the whole picture.
+ */
+export interface TargetsWithMetricsPage {
+  items: TargetWithMetrics[]
+  total: number
+  limit: number
+}
+
 export interface PerfSyncResult {
   campaign_rows: number
   ad_group_rows: number

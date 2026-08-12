@@ -316,6 +316,11 @@ export default function CampaignsPage() {
           <FilterBar filters={filters} />
         </div>
         <DataTable
+          // Open on highest spend: a PPC operator wants the campaigns
+          // costing money first, not paused ones with no data. Computed
+          // from the header so reordering columns cannot break it.
+          defaultSortCol={columns.findIndex(c => c.header === 'Spend')}
+          defaultSortDir="desc"
           columns={columns}
           rows={filtered}
           rowKey={r => r.id}

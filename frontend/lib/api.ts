@@ -391,6 +391,36 @@ export const api = {
     return request<import('./types').TargetWithMetrics[]>(`/performance/ad-groups/${adGroupId}/targets?${qs}`)
   },
 
+  /** Ad groups across a profile/account, highest spend first. */
+  listAdGroupsWithMetrics: (params: {
+    date_from?: string; date_to?: string
+    profile_id?: string; account_id?: string; limit?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params.date_from) qs.set('date_from', params.date_from)
+    if (params.date_to) qs.set('date_to', params.date_to)
+    if (params.profile_id) qs.set('profile_id', params.profile_id)
+    if (params.account_id) qs.set('account_id', params.account_id)
+    if (params.limit != null) qs.set('limit', String(params.limit))
+    return request<import('./types').AdGroupWithMetrics[]>(`/performance/ad-groups?${qs}`)
+  },
+
+  /** Keywords/targets across a profile/account, highest spend first. */
+  listTargetsWithMetrics: (params: {
+    date_from?: string; date_to?: string
+    profile_id?: string; account_id?: string
+    target_kind?: string; limit?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params.date_from) qs.set('date_from', params.date_from)
+    if (params.date_to) qs.set('date_to', params.date_to)
+    if (params.profile_id) qs.set('profile_id', params.profile_id)
+    if (params.account_id) qs.set('account_id', params.account_id)
+    if (params.target_kind) qs.set('target_kind', params.target_kind)
+    if (params.limit != null) qs.set('limit', String(params.limit))
+    return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
+  },
+
   syncPerformance: (accountId: string, days?: number) => {
     const qs = new URLSearchParams()
     qs.set('account_id', accountId)

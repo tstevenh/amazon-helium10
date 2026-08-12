@@ -501,7 +501,10 @@ export default function SuggestionsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Suggestion Inbox</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            AI-generated negative, harvest &amp; bid adjustment suggestions
+            {/* Not AI: every suggestion comes from a threshold rule you can read
+                and edit on the Rules page. Saying "AI" would hide that. */}
+            Negative, harvest &amp; bid suggestions from your rule thresholds — nothing
+            is sent to Amazon until you approve it
           </p>
         </div>
         <button
