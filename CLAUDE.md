@@ -104,6 +104,13 @@ Celery + Redis, prefork pool (the codebase is synchronous SQLAlchemy).
 | `evaluate_all_rules` | 24h | `rule_schedule_hours` |
 | `check_sync_health` | 30min | `health_check_interval_minutes` |
 
+**`docker compose restart` does not re-read `.env`.** It restarts the
+container with the environment it was created with, so a changed setting
+appears in the file, in `settings` when you import it via `exec`, and *not* in
+the running process — three signals that disagree. Use `docker compose up -d`
+to recreate the container. Verify with `docker compose exec api printenv | grep VAR`,
+which shows what the process actually has.
+
 **Celery reads its task registry only at startup.** After adding or renaming
 a task you must `docker compose restart worker beat`, or Beat will dispatch a
 task the worker rejects with `KeyError` — silently, forever. This has bitten
