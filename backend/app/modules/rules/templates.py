@@ -100,6 +100,25 @@ BUILTIN_TEMPLATES: list[dict[str, Any]] = [
             "action": {"type": "increase_bid", "percent": 10},
         },
     },
+    {
+        "name": "Wasted budget → cut the daily spend",
+        "description": (
+            "Campaigns burning the full daily budget at a poor return. Cuts "
+            "20% rather than pausing, so the campaign keeps its history and "
+            "its ranking, and you can raise it again once ACoS recovers."
+        ),
+        "rule_type": "budget",
+        "configuration_json": {
+            "conditions": [
+                {"field": "acos", "operator": "gt", "value": 45},
+                {"field": "clicks", "operator": "gte", "value": 20},
+            ],
+            "logic": "AND",
+            "suggestion_type": "budget_decrease",
+            "lookback_days": 30,
+            "action": {"type": "decrease_budget", "percent": 20},
+        },
+    },
 ]
 
 

@@ -218,3 +218,53 @@ def update_campaign_state(
                    campaign_id, state, profile_id)
     resp = _request_with_retry("PUT", url, json=body, headers=headers, timeout=30)
     return _parse_mutation_result(resp, body, "campaigns")
+
+
+# ---------------------------------------------------------------------------
+# Campaign budget — budget rules only
+# ---------------------------------------------------------------------------
+#
+# Separate from update_campaign_state on purpose. Bundling them would let a
+# dayparting schedule alter spend limits, or a budget rule pause a campaign.
+# Each function sends exactly one field.
+
+# Amazon's floor for Sponsored Products daily budget is $1.00. A lower value is
+# rejected, so it is caught here rather than turned into a per-item error.
+_MIN_DAILY_BUDGET = 1.00
+
+
+class BudgetRefused(Exception):
+    """A budget value Amazon would reject, or that looks like a mistake."""
+
+
+def _validate_budget(new_budget: Any) -> None:
+    if new_budget is None:
+        raise BudgetRefused("budget is required")
+    try:
+        value = float(new_budget)
+    except (TypeError, ValueError):
+        raise BudgetRefused(f"budget {new_budget!r} is not a number")
+    if value < _MIN_DAILY_BUDGET:
+        raise BudgetRefused(
+            f"daily budget ${value:.2f} is below Amazon's ${_MIN_DAILY_BUDGET:.2f} minimum"
+        )
+
+
+def update_campaign_budget(
+    access_token: str, profile_id: int, campaign_id: int, new_budget: float
+) -> dict[str, Any]:
+    """PUT /sp/campaigns — change one campaign's daily budget."""
+    assert_write_enabled()
+    _validate_budget(new_budget)
+
+    body = {"campaigns": [{
+        "campaignId": str(campaign_id),
+        "budget": {"budget": round(float(new_budget), 2), "budgetType": "DAILY"},
+    }]}
+    url = f"{settings.amazon_api_base_url}/sp/campaigns"
+    headers = _write_headers(access_token, profile_id,
+                             "application/vnd.spCampaign.v3+json")
+    logger.warning("[amazon_write] PUT campaign=%s budget=%s profile=%s",
+                   campaign_id, new_budget, profile_id)
+    resp = _request_with_retry("PUT", url, json=body, headers=headers, timeout=30)
+    return _parse_mutation_result(resp, body, "campaigns")

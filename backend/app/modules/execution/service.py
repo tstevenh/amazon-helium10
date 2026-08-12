@@ -30,6 +30,7 @@ from app.modules.execution.repository import (
     ACTION_EXECUTED,
     ACTION_EXECUTION_FAILED,
     ACTION_ROLLED_BACK,
+    ENTITY_CAMPAIGN,
     ENTITY_TARGET,
     ExecutionRepository,
     SOURCE_ROLLBACK,
@@ -47,6 +48,7 @@ STATUS_EXECUTION_FAILED = "execution_failed"
 # rather than silently ignored — an unhandled type must not look executed.
 _BID_TYPES = {"bid_increase", "bid_decrease", "bid_change"}
 _NEGATIVE_TYPES = {"negative_exact", "negative_phrase"}
+_BUDGET_TYPES = {"budget_increase", "budget_decrease"}
 
 
 class ExecutionService:
@@ -113,6 +115,13 @@ class ExecutionService:
                     "status": suggestion.status, "detail": detail}
 
         stype = (suggestion.suggestion_type or "").lower()
+
+        # Budget changes act on a campaign, not a keyword, so they have their
+        # own path. Same contract: record the attempt before the call, and
+        # write change_log only on confirmation.
+        if stype in _BUDGET_TYPES:
+            return self._execute_budget(suggestion, performed_by)
+
         if stype not in _BID_TYPES:
             # Negatives and product targets need their own execution paths;
             # refuse rather than pretend, so nothing is marked executed that
@@ -120,7 +129,7 @@ class ExecutionService:
             return self._fail(
                 suggestion, performed_by,
                 f"Suggestion type '{stype}' is not executable yet. "
-                f"Supported: {sorted(_BID_TYPES)}.",
+                f"Supported: {sorted(_BID_TYPES | _BUDGET_TYPES)}.",
             )
 
         target = (
@@ -211,6 +220,113 @@ class ExecutionService:
         return {"ok": True, "suggestion_id": str(suggestion.id),
                 "status": STATUS_EXECUTED,
                 "detail": f"bid {old_bid} -> {new_bid}"}
+
+
+    # ── Budget execution ───────────────────────────────────────────────────
+
+    def _execute_budget(
+        self, suggestion: Suggestion, performed_by: uuid.UUID
+    ) -> dict[str, Any]:
+        """Apply an approved budget change to one campaign.
+
+        Mirrors the bid path exactly, including the ordering that makes the
+        audit trail trustworthy: the attempt is recorded before the call, and
+        change_log gets a row only once Amazon confirms.
+        """
+        campaign = (
+            self.db.query(Campaign).filter(Campaign.id == suggestion.campaign_id).one_or_none()
+            if suggestion.campaign_id else None
+        )
+        if campaign is None:
+            return self._fail(suggestion, performed_by,
+                              "Suggestion has no campaign_id — nothing to change.")
+
+        new_budget = (suggestion.suggested_value or {}).get("budget")
+        if new_budget is None:
+            return self._fail(suggestion, performed_by,
+                              "Suggestion has no suggested_value.budget — nothing to set.")
+
+        old_budget = (suggestion.current_value or {}).get("budget")
+        if old_budget is None:
+            old_budget = campaign.daily_budget
+
+        # If the budget has moved since the suggestion was created, the
+        # percentage it was based on no longer applies. Refuse rather than
+        # apply a number computed from stale input.
+        if (campaign.daily_budget is not None and old_budget is not None
+                and abs(float(campaign.daily_budget) - float(old_budget)) > 0.005):
+            return self._fail(
+                suggestion, performed_by,
+                f"Budget changed since this was suggested "
+                f"(now ${float(campaign.daily_budget):.2f}, expected "
+                f"${float(old_budget):.2f}). Re-run the rule to get a fresh "
+                f"suggestion.",
+            )
+
+        try:
+            profile, account = self._context(suggestion)
+        except ValueError as exc:
+            return self._fail(suggestion, performed_by, str(exc))
+
+        request_preview = {"campaigns": [{
+            "campaignId": str(campaign.amazon_campaign_id),
+            "budget": {"budget": float(new_budget), "budgetType": "DAILY"},
+        }]}
+
+        self.repo.record_attempt(
+            suggestion.id, ACTION_EXECUTED, performed_by=performed_by,
+            request=request_preview,
+            notes=f"attempting daily budget {old_budget} -> {new_budget} on "
+                  f"campaign {campaign.amazon_campaign_id}",
+        )
+
+        try:
+            token = self._account_svc.get_valid_access_token(account)
+            result = amazon_ads_write.update_campaign_budget(
+                token, profile.amazon_profile_id,
+                campaign.amazon_campaign_id, float(new_budget),
+            )
+        except AmazonWriteDisabled as exc:
+            return self._fail(suggestion, performed_by, str(exc), request=request_preview)
+        except Exception as exc:
+            return self._fail(suggestion, performed_by,
+                              f"{type(exc).__name__}: {exc}", request=request_preview)
+
+        if not result.get("ok"):
+            return self._fail(
+                suggestion, performed_by, "Amazon rejected the change",
+                request=result.get("request"), response=result.get("response"),
+                status_code=result.get("status_code"),
+            )
+
+        self.repo.record_change(
+            profile_id=profile.id,
+            entity_type=ENTITY_CAMPAIGN,
+            field_changed="daily_budget",
+            old_value=str(old_budget) if old_budget is not None else None,
+            new_value=str(new_budget),
+            source=SOURCE_SUGGESTION_EXECUTION,
+            entity_id=campaign.id,
+            amazon_entity_id=campaign.amazon_campaign_id,
+            suggestion_id=suggestion.id,
+            changed_by=performed_by,
+        )
+        self.repo.record_attempt(
+            suggestion.id, ACTION_EXECUTED, performed_by=performed_by,
+            request=result.get("request"), response=result.get("response"),
+            status_code=result.get("status_code"), notes="confirmed by Amazon",
+        )
+
+        suggestion.status = STATUS_EXECUTED
+        suggestion.executed_at = datetime.now(tz.utc)
+        campaign.daily_budget = new_budget
+        self.db.commit()
+
+        logger.warning("[execution] suggestion %s EXECUTED: campaign %s budget %s -> %s",
+                       suggestion.id, campaign.amazon_campaign_id, old_budget, new_budget)
+        return {"ok": True, "suggestion_id": str(suggestion.id),
+                "status": STATUS_EXECUTED,
+                "detail": f"daily budget {old_budget} -> {new_budget}"}
 
 
 class RollbackService:

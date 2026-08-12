@@ -32,6 +32,8 @@ const TYPE_LABELS: Record<string, string> = {
   keyword_broad:   'KW Broad',
   bid_decrease:    'Bid ↓',
   bid_increase:    'Bid ↑',
+  budget_decrease: 'Budget ↓',
+  budget_increase: 'Budget ↑',
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -42,6 +44,8 @@ const TYPE_COLORS: Record<string, string> = {
   keyword_broad:   'bg-teal-100 text-teal-700',
   bid_decrease:    'bg-purple-100 text-purple-700',
   bid_increase:    'bg-blue-100 text-blue-700',
+  budget_decrease: 'bg-blue-100 text-blue-800',
+  budget_increase: 'bg-cyan-100 text-cyan-800',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -555,7 +559,7 @@ export default function SuggestionsPage() {
 
           {/* Kind — includes 'bid' for Sprint 3 */}
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-            {(['all', 'negative', 'harvest', 'bid'] as const).map(k => (
+            {(['all', 'negative', 'harvest', 'bid', 'budget'] as const).map(k => (
               <button key={k} onClick={() => setKindTab(k)}
                 className={`px-3 py-2 capitalize transition-colors ${
                   kindTab === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
@@ -655,7 +659,10 @@ export default function SuggestionsPage() {
                     title="Select all pending on page"
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 w-44">Search Term</th>
+                {/* Budget suggestions are campaign-level, so this column holds a
+                    campaign name for those rows. Naming it "Search Term" only
+                    would be wrong for every budget row. */}
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 w-44">Term / Campaign</th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 w-24">Type</th>
                 <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600">Reason</th>
                 <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-600 w-20">Conf.</th>

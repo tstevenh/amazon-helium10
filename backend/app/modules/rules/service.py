@@ -51,9 +51,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.search_terms.repository import SearchTermRepository
+from app.modules.suggestions.models import Suggestion
 from app.modules.suggestions.repository import SuggestionRepository
 from app.modules.suggestions.asin import asin_safe_suggestion_type
-from app.modules.campaigns.models import Target
+from app.modules.campaigns.models import Campaign, Target
 from app.modules.rules.models import Rule, RuleCampaignScope
 from app.modules.rules.repository import RuleExecutionRepository
 
@@ -165,12 +166,17 @@ class RuleEngine:
                 r.campaign_id for r in self.db.query(RuleCampaignScope)
                 .filter(RuleCampaignScope.rule_id == rule.id).all()
             ]
-            rows      = self.st_repo.get_aggregated_by_term(
-                profile_id   = rule.profile_id,
-                date_from    = date_from,
-                date_to      = date.today(),
-                campaign_ids = scoped_ids or None,
-            )
+            # Budget rules operate on campaign totals, not on search terms:
+            # a budget belongs to a campaign, and no search term has one.
+            if rule.rule_type == "budget":
+                rows = self._campaign_rows(rule, date_from, scoped_ids)
+            else:
+                rows = self.st_repo.get_aggregated_by_term(
+                    profile_id   = rule.profile_id,
+                    date_from    = date_from,
+                    date_to      = date.today(),
+                    campaign_ids = scoped_ids or None,
+                )
             if scoped_ids:
                 logger.info("[rules] rule=%s scoped to %d campaigns", rule.id, len(scoped_ids))
 
@@ -179,7 +185,12 @@ class RuleEngine:
 
             for row in rows:
                 if self._matches(row, conds, logic):
-                    if self._make_suggestion(row, rule, sugg_type, action):
+                    made = (
+                        self._make_budget_suggestion(row, rule, sugg_type, action)
+                        if rule.rule_type == "budget"
+                        else self._make_suggestion(row, rule, sugg_type, action)
+                    )
+                    if made:
                         created_count += 1
 
             exec_rec = self.exec_repo.complete(
@@ -276,6 +287,230 @@ class RuleEngine:
             return None
 
         return target, current, new_bid
+
+    # ── Budget rules ───────────────────────────────────────────────────────
+
+    _BUDGET_TYPES = {"budget_increase", "budget_decrease"}
+
+    # Spec, verified from Adtomic: skip campaigns under 3 days old. Amazon needs
+    # roughly 72 hours before a new campaign's numbers mean anything, and a
+    # budget cut based on day-one data would strangle a campaign before it had
+    # a chance to perform.
+    _NEW_CAMPAIGN_GRACE_DAYS = 3
+
+    def _campaign_rows(
+        self, rule: Rule, date_from: date, scoped_ids: list
+    ) -> list[dict]:
+        """Campaign totals over the lookback window, shaped like a rule row.
+
+        Returns the same keys _matches() reads for search terms, so one
+        condition evaluator serves both. `search_term` carries the campaign
+        name because suggestions.search_term is NOT NULL and the campaign name
+        is what the operator needs to see on the row.
+        """
+        from app.modules.performance.repository import PerformanceRepository
+
+        campaigns = (
+            self.db.query(Campaign)
+            .filter(Campaign.profile_id == rule.profile_id,
+                    Campaign.deleted_at.is_(None))
+            .all()
+        )
+        if scoped_ids:
+            wanted = set(scoped_ids)
+            campaigns = [c for c in campaigns if c.id in wanted]
+
+        cutoff = date.today() - timedelta(days=self._NEW_CAMPAIGN_GRACE_DAYS)
+        eligible = []
+        for c in campaigns:
+            # start_date is Amazon's; created_at is ours. Prefer Amazon's, and
+            # fall back to when we first saw the campaign.
+            began = c.start_date or (c.created_at.date() if c.created_at else None)
+            if began is not None and began > cutoff:
+                logger.info(
+                    "[rules] skipping campaign %s — started %s, inside the "
+                    "%d-day grace window",
+                    c.name, began, self._NEW_CAMPAIGN_GRACE_DAYS,
+                )
+                continue
+            eligible.append(c)
+
+        if not eligible:
+            return []
+
+        metrics = PerformanceRepository(self.db).get_all_campaigns_summary(
+            [str(c.id) for c in eligible], date_from, date.today(),
+        )
+
+        rows: list[dict] = []
+        for c in eligible:
+            m = metrics.get(str(c.id))
+            if not m:
+                # No performance rows in the window: nothing to reason about.
+                continue
+            rows.append({
+                "campaign_id":     c.id,
+                "ad_group_id":     None,
+                "search_term":     c.name,
+                "impressions":     m["impressions"],
+                "clicks":          m["clicks"],
+                "cost":            m["spend"],
+                "sales":           m["sales"],
+                "orders":          m["orders"],
+                # UNIT TRAP: rule rows carry acos as a RATIO (0.577), because
+                # _field_value multiplies _PERCENT_FIELDS by 100 for comparison
+                # against the user's "40" meaning 40%. SearchTermRepository
+                # returns a ratio; PerformanceRepository returns a PERCENTAGE
+                # for acos while returning a ratio for ctr — inconsistent within
+                # the same function. Converting here keeps one convention in the
+                # engine.
+                #
+                # Without this, "ACOS > 40" evaluated as "ACOS > 0.4%" and
+                # matched a campaign running at 24% real ACOS, i.e. it proposed
+                # cutting the budget of a profitable campaign.
+                "acos":            (Decimal(str(m["acos"])) / 100
+                                    if m["acos"] is not None else None),
+                "roas":            m["roas"],
+                "ctr":             m["ctr"] or 0,
+                "conversion_rate": (
+                    Decimal(m["orders"]) / Decimal(m["clicks"])
+                    if m["clicks"] else Decimal(0)
+                ),
+                "campaign_count":  1,
+                "ad_group_count":  1,
+                "_campaign":       c,
+            })
+        return rows
+
+    def _resolve_budget_change(
+        self, row: dict, suggestion_type: str, action: Optional[dict]
+    ) -> Optional[tuple]:
+        """Returns (campaign, current_budget, new_budget) or None to skip."""
+        if suggestion_type not in self._BUDGET_TYPES:
+            return None
+        campaign = row.get("_campaign")
+        if campaign is None or campaign.daily_budget is None:
+            return None
+
+        pct = float((action or {}).get("percent", 20))
+        current = float(campaign.daily_budget)
+        if suggestion_type == "budget_increase":
+            new_budget = current * (1 + pct / 100.0)
+        else:
+            new_budget = current * (1 - pct / 100.0)
+        new_budget = round(new_budget, 2)
+
+        # Amazon's SP daily-budget floor. Below it the write would be rejected,
+        # so skip rather than create a suggestion guaranteed to fail.
+        if new_budget < 1.00:
+            return None
+        # A change too small to matter is noise in the inbox.
+        if abs(new_budget - current) < 0.01:
+            return None
+
+        return campaign, current, new_budget
+
+    def _make_budget_suggestion(
+        self,
+        row: dict,
+        rule: Rule,
+        suggestion_type: str,
+        action: Optional[dict],
+    ) -> bool:
+        """Create one budget suggestion per campaign, if none is pending.
+
+        Uniqueness is enforced in the database too — see migration 020. Without
+        it a daily evaluation would stack a new suggestion every day, each
+        proposing a change from the ORIGINAL budget, so approving two would
+        compound into a change nobody intended.
+        """
+        resolved = self._resolve_budget_change(row, suggestion_type, action)
+        if resolved is None:
+            return False
+        campaign, current, new_budget = resolved
+
+        # Two constraints guard this row, and BOTH must be checked here or the
+        # insert raises IntegrityError and kills the whole rule run:
+        #
+        #   uq_suggestions_pending_budget_per_campaign (source_rule_id, campaign_id)
+        #     — the spec's rule, stops one rule stacking daily suggestions.
+        #   uq_suggestion_pending_profile_term_type (profile_id, search_term,
+        #     suggestion_type) — pre-existing, and for budget rows search_term
+        #     is the campaign name, so it also stops TWO DIFFERENT rules both
+        #     proposing a budget change to the same campaign.
+        #
+        # The second is stricter and desirable: two pending cuts on one campaign
+        # would compound if both were approved. Found by running two rules
+        # against the same campaign and watching the run fail.
+        same_rule = (
+            self.db.query(Suggestion)
+            .filter(
+                Suggestion.source_rule_id == rule.id,
+                Suggestion.campaign_id == campaign.id,
+                Suggestion.suggestion_type == suggestion_type,
+                Suggestion.status == "pending",
+            )
+            .first()
+        )
+        if same_rule is not None:
+            return False
+
+        if self.sugg_repo.pending_exists(
+            rule.profile_id, campaign.name, suggestion_type
+        ):
+            logger.info(
+                "[rules] campaign %s already has a pending %s from another rule",
+                campaign.name, suggestion_type,
+            )
+            return False
+
+        config = rule.configuration_json or {}
+        conds  = config.get("conditions", [])
+        logic  = config.get("logic", "AND")
+        reason = self._build_reason(rule, action, row)
+        direction = "raise" if suggestion_type == "budget_increase" else "lower"
+        reason = (
+            f"{reason} — {direction} daily budget ${current:.2f} → ${new_budget:.2f}"
+            if reason else
+            f"{direction} daily budget ${current:.2f} → ${new_budget:.2f}"
+        )
+
+        snap = {
+            "impressions":     row.get("impressions", 0),
+            "clicks":          row.get("clicks", 0),
+            "cost":            str(row.get("cost", 0)),
+            "sales":           str(row.get("sales", 0)),
+            "orders":          row.get("orders", 0),
+            "acos":            str(row["acos"]) if row.get("acos") is not None else None,
+            "roas":            str(row["roas"]) if row.get("roas") is not None else None,
+            "ctr":             str(row.get("ctr", 0)),
+            "conversion_rate": str(row.get("conversion_rate", 0)),
+        }
+
+        self.sugg_repo.create(dict(
+            profile_id       = rule.profile_id,
+            campaign_id      = campaign.id,
+            ad_group_id      = None,
+            search_term      = campaign.name,
+            target_id        = None,
+            current_value    = {"budget": current},
+            suggested_value  = {"budget": new_budget},
+            suggestion_type  = suggestion_type,
+            kind             = "budget",
+            reason           = reason,
+            metrics_snapshot = snap,
+            status           = "pending",
+            confidence_score = _rule_confidence(row, conds, logic),
+            campaign_count   = 1,
+            ad_group_count   = 1,
+            total_spend      = row.get("cost")  or Decimal("0"),
+            total_sales      = row.get("sales") or Decimal("0"),
+            total_orders     = int(row.get("orders") or 0),
+            source_type      = "rule",
+            source_rule_id   = rule.id,
+            source_rule_name = rule.name,
+        ))
+        return True
 
     def _make_suggestion(
         self,

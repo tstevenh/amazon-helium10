@@ -22,6 +22,7 @@ _KNOWN_SUGGESTION_TYPES = {
     "negative_exact", "negative_phrase",
     "keyword_exact", "keyword_phrase", "keyword_broad",
     "bid_decrease", "bid_increase",
+    "budget_decrease", "budget_increase",
 }
 
 
@@ -55,7 +56,8 @@ def test_template_suggestion_type_matches_its_rule_type(template):
     sugg = config["suggestion_type"]
     assert sugg in _KNOWN_SUGGESTION_TYPES
 
-    prefix = {"negative": "negative_", "harvest": "keyword_", "bid": "bid_"}
+    prefix = {"negative": "negative_", "harvest": "keyword_",
+              "bid": "bid_", "budget": "budget_"}
     assert sugg.startswith(prefix[template["rule_type"]]), (
         f"{template['rule_type']} rule must not create a {sugg} suggestion"
     )
@@ -63,12 +65,14 @@ def test_template_suggestion_type_matches_its_rule_type(template):
 
 @pytest.mark.parametrize("template", BUILTIN_TEMPLATES, ids=lambda t: t["name"])
 def test_bid_templates_carry_an_action(template):
-    """Without an action a bid rule has no percentage to apply."""
-    if template["rule_type"] != "bid":
+    """Without an action a bid or budget rule has no percentage to apply."""
+    if template["rule_type"] not in {"bid", "budget"}:
         return
     action = template["configuration_json"].get("action")
-    assert action, "bid template needs an action"
-    assert action["type"] in {"increase_bid", "decrease_bid"}
+    assert action, f"{template['rule_type']} template needs an action"
+    assert action["type"] in {
+        "increase_bid", "decrease_bid", "increase_budget", "decrease_budget",
+    }
     assert 0 < action["percent"] <= 100
 
 
@@ -102,3 +106,16 @@ def test_builtin_names_are_unique():
     """Seeding matches builtins by name, so duplicates would fight each other."""
     names = [t["name"] for t in BUILTIN_TEMPLATES]
     assert len(names) == len(set(names))
+
+
+def test_budget_templates_only_cut_never_raise_by_default():
+    """A built-in that raises spend on its own is a bad default.
+
+    Cutting waste is safe to suggest out of the box; raising budgets commits
+    real money and should be a decision someone makes deliberately, not one a
+    seeded template offers on day one.
+    """
+    budget = [t for t in BUILTIN_TEMPLATES if t["rule_type"] == "budget"]
+    assert budget, "expected at least one budget template"
+    for t in budget:
+        assert t["configuration_json"]["suggestion_type"] == "budget_decrease"

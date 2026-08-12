@@ -249,17 +249,21 @@ export interface RuleCondition {
   value:    number
 }
 
-export interface BidAction {
-  type:    'increase_bid' | 'decrease_bid'
+/** The percentage change a bid or budget rule applies when it matches. */
+export interface RuleAction {
+  type:    'increase_bid' | 'decrease_bid' | 'increase_budget' | 'decrease_budget'
   percent: number
 }
+
+/** @deprecated kept so existing imports keep compiling; use RuleAction. */
+export type BidAction = RuleAction
 
 export interface RuleConfiguration {
   conditions:      RuleCondition[]
   suggestion_type: string
   lookback_days:   number
   logic:           'AND' | 'OR'
-  action?:         BidAction
+  action?:         RuleAction
 }
 
 export interface Rule {

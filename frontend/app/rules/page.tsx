@@ -28,12 +28,14 @@ const RULE_TYPE_LABELS: Record<string, string> = {
   negative: 'Negative',
   harvest:  'Harvest',
   bid:      'Bid Adjustment',
+  budget:   'Budget',
 }
 
 const RULE_TYPE_COLORS: Record<string, string> = {
   negative: 'bg-red-100 text-red-700',
   harvest:  'bg-green-100 text-green-700',
   bid:      'bg-purple-100 text-purple-700',
+  budget:   'bg-blue-100 text-blue-700',
 }
 
 const EXEC_STATUS_COLORS: Record<string, string> = {
@@ -78,6 +80,10 @@ const SUGGESTION_TYPES: Record<string, { value: string; label: string }[]> = {
     { value: 'bid_decrease', label: 'Decrease Bid' },
     { value: 'bid_increase', label: 'Increase Bid' },
   ],
+  budget: [
+    { value: 'budget_decrease', label: 'Decrease Daily Budget' },
+    { value: 'budget_increase', label: 'Increase Daily Budget' },
+  ],
 }
 
 const LOOKBACK_OPTIONS = [
@@ -113,7 +119,10 @@ function defaultConfig(ruleType: string): RuleConfiguration {
     suggestion_type: suggTypes[0]?.value ?? '',
     lookback_days:   30,
     logic:           'AND',
-    action:          ruleType === 'bid' ? { type: 'decrease_bid', percent: 10 } : undefined,
+    action:
+      ruleType === 'bid'    ? { type: 'decrease_bid', percent: 10 }
+      : ruleType === 'budget' ? { type: 'decrease_budget', percent: 20 }
+      : undefined,
   }
 }
 
@@ -564,6 +573,46 @@ function RuleModal({
                   />
                   <span className="text-sm text-gray-600">%</span>
                 </div>
+              </div>
+            )}
+
+            {/* Budget action — only for budget rules */}
+            {ruleType === 'budget' && (
+              <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Daily Budget Action</label>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={config.action?.type ?? 'decrease_budget'}
+                    onChange={e => setConfig(c => ({
+                      ...c,
+                      suggestion_type: e.target.value === 'decrease_budget' ? 'budget_decrease' : 'budget_increase',
+                      action: { ...c.action, type: e.target.value as 'decrease_budget' | 'increase_budget', percent: c.action?.percent ?? 20 },
+                    }))}
+                    className="input text-sm py-1.5 flex-1"
+                  >
+                    <option value="decrease_budget">Decrease daily budget</option>
+                    <option value="increase_budget">Increase daily budget</option>
+                  </select>
+                  <span className="text-sm text-gray-600">by</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={config.action?.percent ?? 20}
+                    onChange={e => setConfig(c => ({
+                      ...c,
+                      action: { ...c.action!, percent: parseFloat(e.target.value) || 20 },
+                    }))}
+                    className="input text-sm py-1.5 w-20"
+                  />
+                  <span className="text-sm text-gray-600">%</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Budget rules read whole-campaign totals, not search terms, and skip
+                  campaigns started in the last 3 days — Amazon needs about 72 hours
+                  before a new campaign&apos;s numbers mean anything. Amazon&apos;s minimum
+                  daily budget is $1.00; a cut that would go below it is skipped.
+                </p>
               </div>
             )}
 

@@ -51,7 +51,7 @@ def test_every_public_write_function_checks_the_switch():
     """
     src = inspect.getsource(w)
     for name in ("update_keyword_bid", "update_target_bid", "create_negative_keyword",
-                 "update_campaign_state"):
+                 "update_campaign_state", "update_campaign_budget"):
         if f"def {name}(" not in src:
             continue   # not implemented yet — Task 2 adds these
         fn_src = src[src.index(f"def {name}("):]
@@ -100,3 +100,40 @@ def test_campaign_state_is_still_gated_by_the_kill_switch(monkeypatch):
     monkeypatch.setattr(settings, "amazon_write_enabled", False)
     with pytest.raises(AmazonWriteDisabled):
         w.update_campaign_state("tok", 1, 123, "PAUSED")
+
+
+def test_budget_write_is_gated_by_the_kill_switch(monkeypatch):
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import AmazonWriteDisabled
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", False)
+    with pytest.raises(AmazonWriteDisabled):
+        w.update_campaign_budget("tok", 1, 123, 10.0)
+
+
+def test_budget_below_amazons_minimum_is_refused(monkeypatch):
+    """Amazon's SP daily budget floor is $1.00.
+
+    Catching it here turns a per-item API error into a clear local failure,
+    and stops a rule from generating suggestions that can never execute.
+    """
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import BudgetRefused
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", True)
+    for bad in (0, 0.99, -5, None, "abc"):
+        with pytest.raises(BudgetRefused):
+            w.update_campaign_budget("tok", 1, 123, bad)
+
+
+def test_budget_write_sends_only_the_budget():
+    """It must not be able to pause a campaign or rename it."""
+    import inspect
+
+    body_lines = [
+        line for line in inspect.getsource(w.update_campaign_budget).splitlines()
+        if "body = " in line or '"campaignId"' in line or '"budget"' in line
+    ]
+    body_src = "\n".join(body_lines)
+    for field in ('"state"', '"name"', '"targetingType"'):
+        assert field not in body_src, f"budget write must not include {field}"
