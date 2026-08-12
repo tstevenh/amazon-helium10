@@ -24,7 +24,7 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=["app.worker.tasks", "app.worker.schedule", "app.worker.health",
              "app.worker.execution_tasks", "app.worker.rule_tasks",
-             "app.worker.dayparting_tasks"],
+             "app.worker.dayparting_tasks", "app.worker.notification_tasks"],
 )
 
 celery_app.conf.update(
@@ -74,6 +74,14 @@ def build_beat_schedule(hours: int) -> dict:
         "task": "reconcile_dayparting",
         "schedule": float(settings.dayparting_interval_minutes * 60),
     }
+    # The digest is the one message a day that answers "does anything need me?".
+    # It runs even with no webhook configured, because it is also written to
+    # notification_log and read by the Notifications screen.
+    if settings.digest_interval_hours > 0:
+        schedule["send-daily-digest"] = {
+            "task": "send_daily_digest",
+            "schedule": float(settings.digest_interval_hours * 3600),
+        }
     return schedule
 
 

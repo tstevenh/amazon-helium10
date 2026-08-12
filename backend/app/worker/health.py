@@ -121,7 +121,25 @@ def check_sync_health() -> dict:
                 f"  STALE account={s['name']} last_success={s['last_success']} "
                 f"(threshold {result['stale_after_hours']}h)"
             )
-        send_alert("\n".join(lines))
+        # Route through NotificationService rather than send_alert directly:
+        # this writes a notification_log row first, so an unconfigured webhook
+        # still leaves a record the Notifications screen can show. Alerting
+        # existed before and eight failed syncs were still missed, because
+        # stderr is not somewhere anyone looks.
+        from app.modules.notifications.service import (
+            EVENT_SYNC_FAILED, NotificationService,
+        )
+
+        body = "\n".join(lines[1:])
+        NotificationService(db).notify(
+            EVENT_SYNC_FAILED,
+            subject=(
+                f"Sync health problem: {len(result['failed_recent'])} failed, "
+                f"{len(result['stale_accounts'])} stale"
+            ),
+            body=body,
+            payload=result,
+        )
         return result
     finally:
         db.close()

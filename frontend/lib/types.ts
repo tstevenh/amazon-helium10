@@ -485,3 +485,30 @@ export interface DaypartingRun {
   outcome: string
   detail: string | null
 }
+
+// ── Notifications ─────────────────────────────────────────────────────────
+
+export interface NotificationEntry {
+  id: string
+  event_type: string
+  channel: string | null
+  subject: string | null
+  body: string | null
+  /** delivered | failed | logged_only — logged_only means no webhook is set */
+  delivery_status: string
+  error_message: string | null
+  read_at: string | null
+  sent_at: string
+}
+
+export interface NotificationPage {
+  items: NotificationEntry[]
+  unread: number
+  webhook_configured: boolean
+}
+
+export interface DigestPreview {
+  subject: string
+  body: string
+  data: Record<string, unknown>
+}

@@ -421,6 +421,27 @@ export const api = {
     return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
   },
 
+  // ── Notifications ───────────────────────────────────────────────────────
+
+  listNotifications: (params?: { limit?: number; unread_only?: boolean }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit != null) qs.set('limit', String(params.limit))
+    if (params?.unread_only) qs.set('unread_only', 'true')
+    return request<import('./types').NotificationPage>(`/notifications?${qs}`)
+  },
+
+  markNotificationRead: (id: string) =>
+    request<void>(`/notifications/${id}/read`, { method: 'POST' }),
+
+  markAllNotificationsRead: () =>
+    request<void>('/notifications/read-all', { method: 'POST' }),
+
+  previewDigest: () =>
+    request<import('./types').DigestPreview>('/notifications/digest-preview'),
+
+  sendTestDigest: () =>
+    request<import('./types').NotificationEntry>('/notifications/test-digest', { method: 'POST' }),
+
   // ── Dayparting ──────────────────────────────────────────────────────────
 
   listDaypartingSchedules: (profileId?: string) =>

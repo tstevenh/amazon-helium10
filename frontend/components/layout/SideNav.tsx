@@ -33,6 +33,7 @@ const MAIN_MODULES: NavItem[] = [
 
 const SETTINGS_MODULES: NavItem[] = [
   { label: 'Accounts', href: '/accounts', icon: '🏪' },
+  { label: 'Notifications', href: '/notifications', icon: '🔔' },
   { label: 'Sync Monitor', href: '/sync-monitor', icon: '🩺' },
   { label: 'Users',    href: '/users',    icon: '👥', adminOnly: true },
 ]

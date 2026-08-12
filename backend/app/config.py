@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     # error bound: a missed run means campaigns sit in the wrong state for at
     # most this long. Windows are whole hours, so 60 is the natural default.
     dayparting_interval_minutes: int = 60
+    # Daily digest cadence. 0 disables it. Not a cron expression on purpose —
+    # Beat here uses plain intervals, and a fake cron would imply a wall-clock
+    # guarantee this scheduler does not offer.
+    digest_interval_hours: int = 24
 
     # Performance sync: how many days of history to pull on first sync.
     # Subsequent syncs (already-synced profiles) use a 3-day rolling window.
