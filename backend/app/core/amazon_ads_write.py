@@ -168,3 +168,53 @@ def create_negative_keyword(
                    keyword_text, f"NEGATIVE_{bare}", ad_group_id, profile_id)
     resp = _request_with_retry("POST", url, json=body, headers=headers, timeout=30)
     return _parse_mutation_result(resp, body, "negativeKeywords")
+
+
+# ---------------------------------------------------------------------------
+# Campaign state — dayparting only
+# ---------------------------------------------------------------------------
+#
+# This is the most consequential write in the app. A wrong bid costs cents; a
+# campaign left paused costs a day of sales. Two guards beyond the kill-switch:
+#
+#   1. Only ENABLED and PAUSED are accepted. ARCHIVED is irreversible on
+#      Amazon and is refused outright — nothing in this app should be able to
+#      archive a campaign, ever.
+#   2. The caller passes the state it believes the campaign is currently in.
+#      A no-op is skipped rather than sent, so a stuck scheduler cannot
+#      hammer Amazon with redundant identical writes.
+
+_ALLOWED_CAMPAIGN_STATES = ("ENABLED", "PAUSED")
+
+
+class CampaignStateRefused(Exception):
+    """A campaign state change that must never be attempted."""
+
+
+def update_campaign_state(
+    access_token: str, profile_id: int, campaign_id: int, new_state: str
+) -> dict[str, Any]:
+    """PUT /sp/campaigns — pause or re-enable one campaign.
+
+    Used only by the dayparting executor. Bid and budget changes have their own
+    functions; this one deliberately cannot touch either.
+    """
+    assert_write_enabled()
+
+    state = (new_state or "").upper()
+    if state not in _ALLOWED_CAMPAIGN_STATES:
+        # ARCHIVED lands here. Amazon cannot un-archive a campaign, so this is
+        # a refusal rather than a validation error.
+        raise CampaignStateRefused(
+            f"campaign state {new_state!r} is not permitted; "
+            f"allowed: {', '.join(_ALLOWED_CAMPAIGN_STATES)}"
+        )
+
+    body = {"campaigns": [{"campaignId": str(campaign_id), "state": state}]}
+    url = f"{settings.amazon_api_base_url}/sp/campaigns"
+    headers = _write_headers(access_token, profile_id,
+                             "application/vnd.spCampaign.v3+json")
+    logger.warning("[amazon_write] PUT campaign=%s state=%s profile=%s",
+                   campaign_id, state, profile_id)
+    resp = _request_with_retry("PUT", url, json=body, headers=headers, timeout=30)
+    return _parse_mutation_result(resp, body, "campaigns")

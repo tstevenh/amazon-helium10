@@ -50,7 +50,8 @@ def test_every_public_write_function_checks_the_switch():
     write a behavioural test for it.
     """
     src = inspect.getsource(w)
-    for name in ("update_keyword_bid", "update_target_bid", "create_negative_keyword"):
+    for name in ("update_keyword_bid", "update_target_bid", "create_negative_keyword",
+                 "update_campaign_state"):
         if f"def {name}(" not in src:
             continue   # not implemented yet — Task 2 adds these
         fn_src = src[src.index(f"def {name}("):]
@@ -66,3 +67,36 @@ def test_every_public_write_function_checks_the_switch():
 def test_module_documents_why_the_switch_exists():
     """The safety model must be explained where the next author will read it."""
     assert w.__doc__ and "kill-switch" in w.__doc__.lower()
+
+
+def test_campaign_state_cannot_archive():
+    """Amazon cannot un-archive a campaign, so the app must never send it.
+
+    A bad bid costs cents and is reversible. An archived campaign is gone —
+    it cannot be restored through any API, only recreated by hand.
+    """
+    from app.core.amazon_ads_write import (
+        CampaignStateRefused, _ALLOWED_CAMPAIGN_STATES, update_campaign_state,
+    )
+
+    assert "ARCHIVED" not in _ALLOWED_CAMPAIGN_STATES
+    assert set(_ALLOWED_CAMPAIGN_STATES) == {"ENABLED", "PAUSED"}
+
+
+def test_campaign_state_refuses_archive_before_checking_anything_else(monkeypatch):
+    """The refusal must not depend on the kill-switch being on."""
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import AmazonWriteDisabled, CampaignStateRefused
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", True)
+    with pytest.raises(CampaignStateRefused):
+        w.update_campaign_state("tok", 1, 123, "ARCHIVED")
+
+
+def test_campaign_state_is_still_gated_by_the_kill_switch(monkeypatch):
+    from app.core import amazon_ads_write as w
+    from app.core.amazon_ads_write import AmazonWriteDisabled
+
+    monkeypatch.setattr(settings, "amazon_write_enabled", False)
+    with pytest.raises(AmazonWriteDisabled):
+        w.update_campaign_state("tok", 1, 123, "PAUSED")

@@ -126,11 +126,59 @@ def test_bid_validation_happens_before_any_request(fake_requests, writes_enabled
     assert fake_requests.calls == []
 
 
-def test_write_client_cannot_create_campaigns():
-    """Team constraint: the test campaign is created by a human in Amazon's
-    console. The code's write surface must stay at three endpoints."""
+def test_write_client_cannot_create_anything():
+    """The write client changes existing objects. It never creates structure.
+
+    Originally this banned any mention of /sp/campaigns. Dayparting then needed
+    PUT /sp/campaigns to pause and re-enable, so the blanket ban was replaced
+    with the invariant it was actually protecting: no POST to a structural
+    endpoint, and no ad groups or product ads at all.
+
+    The team's constraint stands — campaigns are created by a human in Amazon's
+    console, never by this code.
+    """
     import inspect
 
     src = inspect.getsource(w)
-    for forbidden in ("/sp/campaigns", "/sp/adGroups", "/sp/productAds"):
+
+    # Ad groups and product ads have no legitimate use here at all.
+    for forbidden in ("/sp/adGroups", "/sp/productAds"):
         assert forbidden not in src, f"write client must not touch {forbidden}"
+
+    # Campaigns may be MODIFIED (state, for dayparting) but never created.
+    # A POST to /sp/campaigns is creation; PUT is modification.
+    for line in src.splitlines():
+        if "/sp/campaigns" in line:
+            assert '"POST"' not in line, (
+                "POST to /sp/campaigns creates a campaign; only PUT is allowed"
+            )
+    assert '_request_with_retry("POST", url' not in src.replace(
+        "negativeKeywords", "OK"
+    ) or "/sp/negativeKeywords" in src, (
+        "the only POST in the write client is creating negative keywords"
+    )
+
+
+def test_campaign_writes_are_limited_to_state():
+    """update_campaign_state must not be able to change budget or name.
+
+    Campaign budget is a separate, spec'd feature with its own approval path.
+    Bundling it into the dayparting write would let a schedule silently alter
+    spend limits.
+    """
+    import inspect
+
+    # Only the request body matters. Scanning the whole function would trip on
+    # its own docstring, which mentions budget precisely to say it is elsewhere.
+    body_lines = [
+        line for line in inspect.getsource(w.update_campaign_state).splitlines()
+        if "body = " in line or '"campaigns": [' in line
+    ]
+    body_src = "\n".join(body_lines)
+    assert body_src, "could not find the request body"
+
+    for field in ("budget", "dailyBudget", "name", "targetingType", "bid"):
+        assert field not in body_src, (
+            f"campaign state write must not include {field}: {body_src}"
+        )
+    assert '"state"' in body_src, "the body must set state and nothing else"

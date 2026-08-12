@@ -23,7 +23,8 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=["app.worker.tasks", "app.worker.schedule", "app.worker.health",
-             "app.worker.execution_tasks", "app.worker.rule_tasks"],
+             "app.worker.execution_tasks", "app.worker.rule_tasks",
+             "app.worker.dayparting_tasks"],
 )
 
 celery_app.conf.update(
@@ -64,6 +65,14 @@ def build_beat_schedule(hours: int) -> dict:
     schedule["check-sync-health"] = {
         "task": "check_sync_health",
         "schedule": float(settings.health_check_interval_minutes * 60),
+    }
+    # Dayparting reconciles rather than firing on window edges, so this
+    # interval is the error bound: a missed run leaves campaigns in the wrong
+    # state for at most this long. It runs unconditionally — a schedule that
+    # only reconciles when some other feature is enabled would be a trap.
+    schedule["reconcile-dayparting"] = {
+        "task": "reconcile_dayparting",
+        "schedule": float(settings.dayparting_interval_minutes * 60),
     }
     return schedule
 

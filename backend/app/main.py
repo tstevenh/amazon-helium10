@@ -20,6 +20,7 @@ from app.modules.rules.router import rules_router, templates_router
 from app.modules.performance.router import router as performance_router
 from app.modules.execution.router import execution_router
 from app.modules.sync_jobs.router import router as sync_jobs_router
+from app.modules.dayparting.router import router as dayparting_router
 
 # Make all app.* loggers visible at INFO level regardless of uvicorn's root config.
 logging.getLogger("app").setLevel(logging.INFO)
@@ -50,6 +51,7 @@ app.include_router(templates_router)
 app.include_router(performance_router)
 app.include_router(execution_router)
 app.include_router(sync_jobs_router)
+app.include_router(dayparting_router)
 
 # Dev-only bootstrap — registered unconditionally but the handler returns 404
 # when AMAZON_MOCK_MODE=false, so no production risk.

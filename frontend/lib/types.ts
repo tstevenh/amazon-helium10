@@ -447,3 +447,41 @@ export interface RuleTemplate {
   is_builtin: boolean
   created_at: string
 }
+
+// ── Dayparting ────────────────────────────────────────────────────────────
+
+export interface DaypartingEntry {
+  id: string
+  /** 0 = Monday .. 6 = Sunday */
+  day_of_week: number
+  /** inclusive */
+  hour_start: number
+  /** exclusive — a 0-6 window means ads are back on AT 6am */
+  hour_end: number
+  action_type: string
+  day_name: string
+}
+
+export interface DaypartingSchedule {
+  id: string
+  profile_id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  activated_at: string | null
+  created_at: string
+  campaign_ids: string[]
+  entries: DaypartingEntry[]
+}
+
+export interface DaypartingRun {
+  id: string
+  campaign_id: string | null
+  ran_at: string
+  local_time: string | null
+  desired_state: string | null
+  previous_state: string | null
+  /** applied | already_correct | skipped_writes_disabled | skipped_no_timezone | failed */
+  outcome: string
+  detail: string | null
+}

@@ -127,6 +127,17 @@ Decision 2 rules out. A human uploads a file on whatever cadence they choose.
 
 ### T5 — Dayparting  ·  **new Amazon write endpoint + acts unattended**
 
+> **Scope decided by the user, 2026-08-12.** Operator specifies the hours;
+> the app does not recommend them. This removes the dependency on hourly
+> performance data Amazon does not provide (see above), and keeps most of the
+> value: knowing *when to act* is the feature, knowing *which hours are bad*
+> is an optional extra. D3 (sampling collector) and D6 (heuristic) are
+> therefore **descoped** — not blocked, just not wanted yet.
+>
+> **Organic rank features remain cancelled** per the user's team, confirmed
+> 2026-08-12. Not building the rank-enriched Search Terms tab or Keyword
+> Tracker rules.
+
 **Requires explicit stakeholder sign-off before it ships.** Spec: *"a
 deliberate, narrow exception requiring explicit stakeholder sign-off before
 Sprint 7."* This is the only feature in the app that changes the account

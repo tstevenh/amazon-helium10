@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # A sync that silently never runs is as damaging as one that errors.
     sync_stale_after_hours: int = 24
     health_check_interval_minutes: int = 30
+    # Dayparting reconciles state rather than firing on edges, so this is the
+    # error bound: a missed run means campaigns sit in the wrong state for at
+    # most this long. Windows are whole hours, so 60 is the natural default.
+    dayparting_interval_minutes: int = 60
 
     # Performance sync: how many days of history to pull on first sync.
     # Subsequent syncs (already-synced profiles) use a 3-day rolling window.

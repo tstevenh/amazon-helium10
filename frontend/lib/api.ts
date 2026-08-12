@@ -421,6 +421,41 @@ export const api = {
     return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
   },
 
+  // ── Dayparting ──────────────────────────────────────────────────────────
+
+  listDaypartingSchedules: (profileId?: string) =>
+    request<import('./types').DaypartingSchedule[]>(
+      '/dayparting-schedules' + (profileId ? `?profile_id=${profileId}` : ''),
+    ),
+
+  createDaypartingSchedule: (body: {
+    profile_id: string; name: string; description?: string | null
+    campaign_ids: string[]
+    entries: { day_of_week: number; hour_start: number; hour_end: number; action_type: string }[]
+  }) => request<import('./types').DaypartingSchedule>('/dayparting-schedules', {
+    method: 'POST', body: JSON.stringify(body),
+  }),
+
+  updateDaypartingSchedule: (id: string, body: Record<string, unknown>) =>
+    request<import('./types').DaypartingSchedule>(`/dayparting-schedules/${id}`, {
+      method: 'PATCH', body: JSON.stringify(body),
+    }),
+
+  activateDaypartingSchedule: (id: string) =>
+    request<import('./types').DaypartingSchedule>(`/dayparting-schedules/${id}/activate`, { method: 'POST' }),
+
+  deactivateDaypartingSchedule: (id: string) =>
+    request<import('./types').DaypartingSchedule>(`/dayparting-schedules/${id}/deactivate`, { method: 'POST' }),
+
+  deleteDaypartingSchedule: (id: string) =>
+    request<void>(`/dayparting-schedules/${id}`, { method: 'DELETE' }),
+
+  listDaypartingRuns: (id: string, limit = 50) =>
+    request<import('./types').DaypartingRun[]>(`/dayparting-schedules/${id}/runs?limit=${limit}`),
+
+  runDaypartingNow: (id: string) =>
+    request<Record<string, unknown>>(`/dayparting-schedules/${id}/run-now`, { method: 'POST' }),
+
   // ── Rule templates ──────────────────────────────────────────────────────
 
   listRuleTemplates: (ruleType?: string) =>

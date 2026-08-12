@@ -155,6 +155,25 @@ first**. Doing that made the Rules page report "No rules yet" while two rules
 existed. Data screens should also explain *which* marketplace has data rather
 than implying a sync is needed; see `frontend/lib/emptyState.ts`.
 
+### Dayparting reconciles; it does not fire on edges
+
+`modules/dayparting/` is the only feature that changes the account without a
+human approving each occurrence, so its design is deliberate:
+
+- An entry describes the state a campaign **should be in** during a window, not
+  an event at the window's edges. The executor asks "what should this be right
+  now?" hourly and corrects drift. Edge triggers would be simpler and wrong —
+  this host sleeps, and a missed 6pm "enable" would leave ads off indefinitely.
+- Outside every window, campaigns are **left alone**, never force-enabled.
+  Otherwise activating a schedule would switch on campaigns a human paused.
+- Overlapping windows resolve to `pause`. Overlap is a config error and "off"
+  is the cheaper reading.
+- Amazon exposes **no hourly performance data** for Sponsored Products
+  (`timeUnit: HOURLY` → 400). The operator picks the hours; the app cannot
+  recommend them. Do not add a heuristic that implies otherwise.
+- Schedules are created inactive. Activation is a separate endpoint so the
+  audit trail records who accepted the unattended behaviour.
+
 ### Suggestions are deterministic, not AI
 
 Both engines (`modules/suggestions/service.py` and `modules/rules/service.py`)
