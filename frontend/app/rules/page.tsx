@@ -19,7 +19,7 @@ import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
 import type {
   Rule, RuleExecution, ExecuteRuleResponse, RuleConfiguration, RuleCondition,
-  Profile,
+  Profile, RuleTemplate,
 } from '@/lib/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -275,6 +275,7 @@ function RuleModal({
   initial,
   profileId,
   profiles,
+  seed,
   onSave,
   onClose,
 }: {
@@ -283,6 +284,8 @@ function RuleModal({
   profileId: string
   initial?: Rule
   profiles: Profile[]
+  /** Pre-fills a brand-new rule from a template. Ignored when editing. */
+  seed?: RuleTemplate
   onSave: (rule: Rule) => void
   onClose: () => void
 }) {
@@ -292,12 +295,14 @@ function RuleModal({
     initial?.profile_id ?? profileId ?? ''
   )
   const mustPickProfile = mode === 'create' && !profileId
-  const [name,        setName]        = useState(initial?.name ?? '')
-  const [description, setDescription] = useState(initial?.description ?? '')
-  const [ruleType,    setRuleType]    = useState<string>(initial?.rule_type ?? 'negative')
+  const [name,        setName]        = useState(initial?.name ?? seed?.name ?? '')
+  const [description, setDescription] = useState(initial?.description ?? seed?.description ?? '')
+  const [ruleType,    setRuleType]    = useState<string>(initial?.rule_type ?? seed?.rule_type ?? 'negative')
   const [status,      setStatus]      = useState<string>(initial?.status ?? 'enabled')
   const [config,      setConfig]      = useState<RuleConfiguration>(
-    initial?.configuration_json ?? defaultConfig(initial?.rule_type ?? 'negative')
+    initial?.configuration_json
+      ?? seed?.configuration_json
+      ?? defaultConfig(initial?.rule_type ?? 'negative')
   )
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState<string | null>(null)
@@ -608,6 +613,8 @@ export default function RulesPage() {
   // Modal state
   const [modalMode,  setModalMode]  = useState<FormMode | null>(null)
   const [editRule,   setEditRule]   = useState<Rule | undefined>(undefined)
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [seed,       setSeed]       = useState<RuleTemplate | undefined>(undefined)
 
   // Per-rule action state
   const [running,    setRunning]    = useState<Record<string, boolean>>({})
@@ -766,12 +773,22 @@ export default function RulesPage() {
           </p>
         </div>
         {!noContext && !noProfiles && (
-          <button
-            onClick={() => { setModalMode('create'); setEditRule(undefined) }}
-            className="btn-primary"
-          >
-            + New Rule
-          </button>
+          <div className="flex gap-2">
+            {/* Templates first: a new marketplace has no rules to clone, and a
+                blank condition form gives no hint what a sane threshold is. */}
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Start from template
+            </button>
+            <button
+              onClick={() => { setSeed(undefined); setEditRule(undefined); setModalMode('create') }}
+              className="btn-primary"
+            >
+              + New Rule
+            </button>
+          </div>
         )}
       </div>
 
@@ -840,7 +857,7 @@ export default function RulesPage() {
                 <tr><td colSpan={showMarketplaceCol ? 8 : 7} className="px-4 py-16 text-center">
                   <div className="text-gray-400 mb-3 text-base">No rules yet</div>
                   <button
-                    onClick={() => setModalMode('create')}
+                    onClick={() => { setSeed(undefined); setModalMode('create') }}
                     className="btn-primary text-sm"
                   >
                     Create your first rule
@@ -965,8 +982,21 @@ export default function RulesPage() {
           initial={editRule}
           profileId={profileId}
           profiles={profiles}
+          seed={seed}
           onSave={handleSaved}
-          onClose={() => { setModalMode(null); setEditRule(undefined) }}
+          onClose={() => { setModalMode(null); setEditRule(undefined); setSeed(undefined) }}
+        />
+      )}
+
+      {showTemplates && (
+        <TemplatePickerModal
+          onClose={() => setShowTemplates(false)}
+          onPick={t => {
+            setSeed(t)
+            setEditRule(undefined)
+            setShowTemplates(false)
+            setModalMode('create')
+          }}
         />
       )}
 
@@ -978,6 +1008,86 @@ export default function RulesPage() {
           onClose={() => { setHistRule(null); setHistExecs([]) }}
         />
       )}
+    </div>
+  )
+}
+
+// ── Template Picker ───────────────────────────────────────────────────────────
+
+/**
+ * Cloning covers "another one like that". This covers the harder case: a
+ * marketplace with no rules at all, where the condition builder is a blank
+ * form and nothing suggests what a reasonable ACoS threshold looks like.
+ */
+function TemplatePickerModal({
+  onClose, onPick,
+}: { onClose: () => void; onPick: (t: RuleTemplate) => void }) {
+  const [templates, setTemplates] = useState<RuleTemplate[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState<string | null>(null)
+
+  useEffect(() => {
+    api.listRuleTemplates()
+      .then(setTemplates)
+      .catch(e => setError(e instanceof ApiError ? e.message : 'Failed to load templates'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+
+  function describe(t: RuleTemplate): string {
+    const c = t.configuration_json
+    const conds = (c.conditions ?? [])
+      .map(x => `${x.field} ${OP_OPTIONS.find(o => o.value === x.operator)?.label ?? x.operator} ${x.value}`)
+      .join(` ${c.logic ?? 'AND'} `)
+    return `IF ${conds} → ${c.suggestion_type} · ${c.lookback_days}d lookback`
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
+          <div>
+            <h2 className="font-semibold text-gray-900">Start from a template</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              You can change every threshold after picking one. Nothing runs until you save.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
+          {loading ? (
+            <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>
+          ) : error ? (
+            <p className="text-sm text-red-600 py-8 text-center">{error}</p>
+          ) : templates.length === 0 ? (
+            <p className="text-sm text-gray-400 py-8 text-center">No templates available.</p>
+          ) : templates.map(t => (
+            <button
+              key={t.id}
+              onClick={() => onPick(t)}
+              className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${RULE_TYPE_COLORS[t.rule_type] ?? 'bg-gray-100 text-gray-600'}`}>
+                  {RULE_TYPE_LABELS[t.rule_type] ?? t.rule_type}
+                </span>
+                <span className="font-medium text-gray-900 text-sm">{t.name}</span>
+                {t.is_builtin && (
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 ml-auto">built-in</span>
+                )}
+              </div>
+              {t.description && <p className="text-xs text-gray-600 mb-1.5">{t.description}</p>}
+              <p className="text-xs font-mono text-gray-500">{describe(t)}</p>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

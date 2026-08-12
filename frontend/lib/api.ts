@@ -421,6 +421,23 @@ export const api = {
     return request<import('./types').TargetsWithMetricsPage>(`/performance/targets?${qs}`)
   },
 
+  // ── Rule templates ──────────────────────────────────────────────────────
+
+  listRuleTemplates: (ruleType?: string) =>
+    request<import('./types').RuleTemplate[]>(
+      '/rule-templates' + (ruleType ? `?rule_type=${ruleType}` : ''),
+    ),
+
+  createRuleTemplate: (body: {
+    name: string; description?: string | null
+    rule_type: string; configuration_json: Record<string, unknown>
+  }) => request<import('./types').RuleTemplate>('/rule-templates', {
+    method: 'POST', body: JSON.stringify(body),
+  }),
+
+  deleteRuleTemplate: (id: string) =>
+    request<void>(`/rule-templates/${id}`, { method: 'DELETE' }),
+
   listSyncJobs: (params?: { limit?: number; account_id?: string }) => {
     const qs = new URLSearchParams()
     if (params?.limit != null) qs.set('limit', String(params.limit))

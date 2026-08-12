@@ -23,8 +23,13 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.audit_log.repository import AuditLogRepository
+from sqlalchemy import func
+
+from app.modules.rules.models import RuleTemplate
 from app.modules.rules.repository import RuleRepository, RuleExecutionRepository
 from app.modules.rules.schemas import (
+    RuleTemplateCreate,
+    RuleTemplateResponse,
     RuleCreate,
     RuleUpdate,
     RuleResponse,
@@ -247,3 +252,73 @@ def get_rule_executions(
     if not rule:
         raise HTTPException(404, "Rule not found")
     return RuleExecutionRepository(db).get_by_rule(rule_id, limit=limit)
+
+
+# ── Rule templates ─────────────────────────────────────────────────────────────
+#
+# Spec Part 21.2: /rule-templates (GET/POST). Separate router because these are
+# reference data, not scoped to a profile — a template is a shape, and only
+# becomes marketplace-specific when a rule is created from it.
+
+templates_router = APIRouter(prefix="/rule-templates", tags=["rule-templates"])
+
+
+@templates_router.get("", response_model=list[RuleTemplateResponse])
+def list_rule_templates(
+    rule_type: Optional[str] = Query(None),
+    db:        Session       = Depends(get_db),
+    _user:     User          = Depends(get_current_user),
+) -> list[RuleTemplate]:
+    q = db.query(RuleTemplate).filter(RuleTemplate.deleted_at.is_(None))
+    if rule_type:
+        q = q.filter(RuleTemplate.rule_type == rule_type)
+    # Built-ins first: a new operator wants the vetted starting points before
+    # whatever a colleague saved last week.
+    return q.order_by(RuleTemplate.is_builtin.desc(), RuleTemplate.name.asc()).all()
+
+
+@templates_router.post("", response_model=RuleTemplateResponse, status_code=201)
+def create_rule_template(
+    body:  RuleTemplateCreate,
+    db:    Session = Depends(get_db),
+    _user: User    = Depends(get_current_user),
+) -> RuleTemplate:
+    template = RuleTemplate(
+        name               = body.name,
+        description        = body.description,
+        rule_type          = body.rule_type,
+        configuration_json = body.configuration_json,
+        is_builtin         = False,   # only the seeder creates built-ins
+        created_by         = _user.id,
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@templates_router.delete("/{template_id}", status_code=204)
+def delete_rule_template(
+    template_id: uuid.UUID,
+    db:          Session = Depends(get_db),
+    _user:       User    = Depends(get_current_user),
+):
+    # No return annotation on purpose. This module uses
+    # `from __future__ import annotations`, so `-> None` reaches FastAPI as the
+    # string "None", which it reads as a response model and then rejects
+    # against 204 ("Status code 204 must not have a response body").
+    template = (
+        db.query(RuleTemplate)
+        .filter(RuleTemplate.id == template_id, RuleTemplate.deleted_at.is_(None))
+        .first()
+    )
+    if template is None:
+        raise HTTPException(404, "Template not found")
+    if template.is_builtin:
+        raise HTTPException(
+            400,
+            "Built-in templates cannot be deleted. Create your own template "
+            "instead, or ignore this one.",
+        )
+    template.deleted_at = func.now()
+    db.commit()

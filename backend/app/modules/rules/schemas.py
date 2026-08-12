@@ -2,8 +2,8 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
-from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict
+from typing import Any, Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Configuration sub-schemas ──────────────────────────────────────────────────
@@ -84,3 +84,26 @@ class ExecuteRuleResponse(BaseModel):
     suggestions_generated: int
     execution_status:      str
     duration_ms:           int
+
+
+# ── Rule templates ─────────────────────────────────────────────────────────────
+
+class RuleTemplateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id:                 uuid.UUID
+    name:               str
+    description:        Optional[str]
+    rule_type:          str
+    configuration_json: dict
+    is_builtin:         bool
+    created_at:         datetime
+
+
+class RuleTemplateCreate(BaseModel):
+    name:        str = Field(min_length=1, max_length=200)
+    description: Optional[str] = None
+    # Matches ck_rule_templates_rule_type in migration 016. A value outside
+    # this set raises CheckViolation on insert.
+    rule_type:   Literal["negative", "harvest", "bid", "budget"]
+    configuration_json: dict

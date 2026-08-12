@@ -16,7 +16,7 @@ from app.modules.campaigns.router import (
 )
 from app.modules.search_terms.router import search_terms_router, st_sync_router
 from app.modules.suggestions.router import suggestions_router
-from app.modules.rules.router import rules_router
+from app.modules.rules.router import rules_router, templates_router
 from app.modules.performance.router import router as performance_router
 from app.modules.execution.router import execution_router
 from app.modules.sync_jobs.router import router as sync_jobs_router
@@ -46,6 +46,7 @@ app.include_router(search_terms_router)
 app.include_router(st_sync_router)
 app.include_router(suggestions_router)
 app.include_router(rules_router)
+app.include_router(templates_router)
 app.include_router(performance_router)
 app.include_router(execution_router)
 app.include_router(sync_jobs_router)
@@ -110,6 +111,22 @@ def _startup_checks() -> None:
                 "Register AMAZON_REDIRECT_URI=%s in your Amazon LWA app.",
                 settings.amazon_redirect_uri,
             )
+
+    # Built-in rule templates are reference data, not user data: seeding them
+    # here means a fresh deployment has usable starting points without anyone
+    # remembering to run a command. Idempotent — matches builtins by name.
+    try:
+        from app.database import SessionLocal
+        from app.modules.rules.templates import seed_builtin_templates
+
+        db = SessionLocal()
+        try:
+            seed_builtin_templates(db)
+        finally:
+            db.close()
+    except Exception as exc:
+        # Never let reference data block the API from serving requests.
+        logger.error("[startup] rule template seeding failed: %s", exc)
 
 
 @app.get("/health/sync")

@@ -434,3 +434,16 @@ export interface SyncJobsPage {
   schedule_hours: number
   jobs: SyncJobRow[]
 }
+
+// ── Rule templates ────────────────────────────────────────────────────────
+
+export interface RuleTemplate {
+  id: string
+  name: string
+  description: string | null
+  rule_type: 'negative' | 'harvest' | 'bid' | 'budget'
+  configuration_json: RuleConfiguration
+  /** Seeded starting points, which cannot be deleted. */
+  is_builtin: boolean
+  created_at: string
+}

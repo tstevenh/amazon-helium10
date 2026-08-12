@@ -1,5 +1,5 @@
 """ORM models for Rules Engine (Sprint 3)."""
-from sqlalchemy import Column, ForeignKey, Integer, String, Text, TIMESTAMP, func
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, TIMESTAMP, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from app.database import Base
 
@@ -52,3 +52,24 @@ class RuleCampaignScope(Base):
     campaign_id = Column(UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"),
                          nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
+class RuleTemplate(Base):
+    """A starting point for a new rule.
+
+    Cloning covers "I want another one like that". Templates cover the harder
+    case: a new marketplace with no rules yet, where the Rule Builder's blank
+    condition form gives no hint what a sensible ACoS threshold looks like.
+    """
+    __tablename__ = "rule_templates"
+
+    id                 = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    name               = Column(String(200), nullable=False)
+    description        = Column(Text, nullable=True)
+    # negative | harvest | bid | budget — constrained in the database
+    rule_type          = Column(String(50), nullable=False)
+    configuration_json = Column(JSONB, nullable=False, server_default="'{}'")
+    is_builtin         = Column(Boolean, nullable=False, server_default="false")
+    created_by         = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at         = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    deleted_at         = Column(TIMESTAMP(timezone=True), nullable=True)
