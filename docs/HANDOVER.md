@@ -427,6 +427,91 @@ the invariant that `LIMIT` must never appear without `ORDER BY`.
 
 ---
 
+## ✅ 2026-08-12 (later): every remaining spec feature built
+
+The instruction was to build everything both spec documents require before
+deploying. That is now done, with two exceptions that cannot be built — see
+below.
+
+| Feature | Spec | State |
+|---|---|---|
+| Rule Templates | Part 21.2 | 4 vetted built-ins, seeded on API startup |
+| Notifications + daily digest | §8.9, §4.3 | Log-first, so an unconfigured webhook still leaves a record |
+| Budget Rules | Phase 2 | 3-day grace window, $1.00 floor, drift check on execute |
+| Dayparting | §8.7, §13.7 | Manual hours, hourly reconciliation, schedules start stopped |
+| Keyword Intelligence v1 | Part 17 | Cerebro import, snapshot history, trends |
+| Placement data + screen | §8 | 219 rows on the live account |
+| Anomaly detection | §13.1 | Query-time; found a real problem immediately |
+| Placement Rules | Phase 3 | Percentage points, full-array writes |
+| Opportunity Finder | §17.5 | All 5 patterns, gated on ≥3 snapshots |
+| Competitor Comparison | Phase 3 | Keyword gap between two ASINs |
+
+Six Amazon write operations now exist, all behind `AMAZON_WRITE_ENABLED`:
+keyword bid, target bid, negative keyword, campaign budget, campaign state
+(dayparting only), placement bid adjustments. Still no create, no delete, and
+`ARCHIVED` is refused outright.
+
+Schema at migration **022**. Test suite at **290**.
+
+### Two things cannot be built
+
+**Hourly dayparting recommendations.** Amazon does not expose hourly
+performance for Sponsored Products. Probed three ways on 2026-08-12:
+`timeUnit: HOURLY` → *"not supported for this report type"*; a `startDateTime`
+column → *"invalid values"*; an hour column without `timeUnit` → *"required
+fields missing"*. The spec half-admits this in §7.2 ("not available faster than
+daily aggregation") while the dayparting section asks for hour-of-day history.
+The operator therefore picks the hours; the app does not suggest them.
+
+**Anything needing organic rank.** `Helium10_Merged` names rank as H10's real
+moat; `PPC_OS_Merged` cancels the Keyword Tracker outright — *"NEVER — REMOVED
+— Decision 2. Not deferred, formally cancelled."* Confirmed still cancelled by
+the user's team on 2026-08-12. So the rank-enriched Search Terms tab and
+Keyword Tracker rules are out by decision, not oversight. This is also the
+reason to keep the Helium 10 subscription: §17.6 says keep it until Keyword
+Intelligence has 3–6 months of snapshots.
+
+### Bugs found the same day, several self-inflicted
+
+| Bug | Why it mattered |
+|---|---|
+| ACoS off by 100× in budget rules | "Cut budget above 40% ACoS" evaluated as 0.4% and proposed cutting a campaign running at 24%. Two repositories disagree on ratio vs percentage — see CLAUDE.md |
+| Scheduled rule evaluation saved nothing | Logged "succeeded" for a week. `RuleEngine` only flushes; the Celery task never committed |
+| `Campaign.placement_bidding` missing from the model | Migration added the column, the ORM did not. Endpoint returned 200 *because* there were no rows yet, so the failing line never ran |
+| Amazon HTTP 425 treated as failure | Amazon dedupes report requests. Any retry inside the 20–40 min window reported an error while the report was building |
+| change-log `count` was the page size | Dashboard fetched 1 row to be cheap and reported "1 change" out of 2 |
+| Empty `placementClassification` silently bucketed | 44 of 219 rows arrived unlabelled; only non-empty mismatches were logged |
+
+### Three features shipped unreachable
+
+Worth recording as a pattern, not just incidents. In each case the backend was
+complete, tested, and verified against live data — and the screen was not:
+
+- **Budget rules** — the Rule Type `<select>` had three hardcoded options and
+  never gained `budget`. Verified via Python, so the gap survived a "done"
+  claim. The picker is now derived from the rule-type map.
+- **Placements** — data, write operation and endpoint built; no screen.
+- **Competitor Comparison** — endpoint built; nothing called it.
+
+All three were found by a direct question about whether the *dashboard* had
+been verified, not by any test. The rule that follows: **verifying the engine
+is not verifying the feature.**
+
+### Still unproven, and why
+
+- Only **keyword-bid** writes have ever reached Amazon. Budget, campaign state
+  and placement writes are built, guarded and unit-tested but have never
+  executed for real.
+- **Dayparting has never written anything** — writes were off during its test.
+  Its refusal path is verified, its success path is not.
+- **The Cerebro parser has never seen a real export.** It was verified against
+  a deliberately messy file written to look like one. The alias table comes
+  from Helium 10's documentation, and the two-step import exists so a header
+  change is visible before anything is stored.
+- **Opportunity patterns have never run on real data** — no snapshots imported.
+
+---
+
 ## Recommended order of work
 
 1. **Review `feat/background-worker`** (11 commits) and `main` (13 commits

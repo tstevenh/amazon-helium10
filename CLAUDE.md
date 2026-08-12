@@ -52,7 +52,7 @@ limitation — see "Unit tests do not touch the database" below.
 ```bash
 docker compose exec api alembic upgrade head
 docker compose exec api alembic revision -m "description"
-docker compose exec api alembic heads      # current: 018
+docker compose exec api alembic heads      # current: 022
 ```
 
 `backend/alembic/` is bind-mounted. It did not used to be, and new migration
@@ -72,9 +72,9 @@ proxy, so all API calls are same-origin.
 ### Where the money-touching code lives
 
 `backend/app/core/amazon_ads_write.py` is **the only module permitted to
-mutate Amazon**, and it exposes exactly four operations: update keyword bids,
-update target bids, create negative keywords, and set campaign state
-(pause/enable, for dayparting only).
+mutate Amazon**, and it exposes exactly six operations: keyword bid, target
+bid, create negative keyword, campaign daily budget, campaign state
+(pause/enable — dayparting only), and campaign placement bid adjustments.
 
 There is no create and no delete anywhere in the app.
 `scripts/create_test_campaign.py` is deliberately a standalone script outside
@@ -108,6 +108,7 @@ Celery + Redis, prefork pool (the codebase is synchronous SQLAlchemy).
 | `evaluate_all_rules` | 24h | `rule_schedule_hours` |
 | `check_sync_health` | 30min | `health_check_interval_minutes` |
 | `reconcile_dayparting` | 60min | `dayparting_interval_minutes` |
+| `send_daily_digest` | 24h | `digest_interval_hours` |
 
 **`docker compose restart` does not re-read `.env`.** It restarts the
 container with the environment it was created with, so a changed setting
@@ -178,6 +179,48 @@ human approving each occurrence, so its design is deliberate:
   recommend them. Do not add a heuristic that implies otherwise.
 - Schedules are created inactive. Activation is a separate endpoint so the
   audit trail records who accepted the unattended behaviour.
+
+### Adding a rule type touches five places
+
+Rule types are `negative | harvest | bid | budget | placement`. Adding one means
+all of:
+
+1. `RuleEngine.execute` — a branch selecting the data source
+2. A `_<type>_rows` method shaping rows like every other rule row
+3. A `_make_<type>_suggestion` method
+4. `ExecutionService.execute` — a branch, plus the write itself
+5. **`SUGGESTION_TYPES` in `frontend/app/rules/page.tsx`**
+
+Step 5 is the one that gets missed. Budget rules shipped complete on the backend,
+tested, and verified against live data — and were **unreachable**, because the
+Rule Type `<select>` had three hardcoded options. The picker is now derived from
+`SUGGESTION_TYPES` so this cannot recur, but the general lesson stands: verifying
+the engine is not verifying the feature.
+
+### Placement adjustments: points, and wholesale replacement
+
+Two traps specific to `placement` rules:
+
+- Amazon's placement setting is a **percentage uplift, 0–900**, and every
+  campaign starts at 0. Changes are in percentage **points** — a multiplicative
+  rule applied to 0 stays 0 forever.
+- Amazon **replaces the whole `placementBidding` array**. Sending only the
+  placement you are changing silently resets the other two to 0%, which looks
+  like success. Suggestions therefore store every current adjustment
+  (`current_value.all_adjustments`) and execution sends the full set, after
+  re-reading live values and refusing if they drifted.
+
+### ACoS units differ between repositories
+
+`SearchTermRepository` and `PerformanceRepository.placement_summary` return ACoS
+as a **ratio** (0.577). `PerformanceRepository.get_all_campaigns_summary` returns
+a **percentage** (57.7) — while returning CTR as a ratio in the same function.
+Rule rows must carry the ratio, because `_field_value` multiplies percent fields
+by 100 to compare against the operator's "40" meaning 40%.
+
+Getting this wrong is not cosmetic: feeding the percentage through unconverted
+made "cut budget above 40% ACoS" fire at 0.4%, and it proposed cutting a
+campaign running at 24%.
 
 ### Suggestions are deterministic, not AI
 
