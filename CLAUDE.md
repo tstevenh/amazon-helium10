@@ -251,6 +251,22 @@ database as well:
 docker compose exec postgres psql -U ppc_os -d ppc_os -c "\d+ table_name"
 ```
 
+**The `/backend` proxy destination is fixed at image build time.** Next
+evaluates `rewrites()` during `npm run build` and writes the result into
+`.next/routes-manifest.json`; `npm run start` reads that file and never
+re-runs the config. So `API_URL` must be a **build arg** — setting it only in
+the compose `environment:` block changes what the process sees and not what it
+routes to. When it was missing at build time the `http://localhost:8000`
+fallback got baked in, and every `/backend/*` call returned 500 while the API
+was healthy and logged no request at all. Check the built image with:
+
+```bash
+docker compose exec frontend grep -o 'http://[a-z0-9.:]*8000' .next/routes-manifest.json
+```
+
+It must print `http://api:8000`. Changing `API_URL` requires
+`docker compose build frontend`, not a restart.
+
 **A `curl` returning 200 does not prove the screen renders.** Several bugs in
 this project's history were client-side only — a hooks-order crash, missing
 columns, a wrong default sort — while every API call returned 200. Verify UI

@@ -119,6 +119,14 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        # Both of these are consumed during `npm run build`, not at runtime.
+        # NEXT_PUBLIC_API_URL is inlined into the browser bundle; API_URL is
+        # frozen into .next/routes-manifest.json as the rewrite destination.
+        # The `environment:` block below is what the running process sees, and
+        # for these two that is too late to matter — keep the pairs in sync.
+        NEXT_PUBLIC_API_URL: /backend
+        API_URL: http://api:8000
     environment:
       # NEXT_PUBLIC_API_URL is baked into the browser bundle at build/dev time.
       # /backend is a same-origin path that the Next.js proxy rewrites to the backend.

@@ -9,6 +9,8 @@ Run manually (inside the api container or locally with DATABASE_URL pointed at t
 """
 import os
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.security import hash_password
 from app.database import SessionLocal
 from app.modules.auth.repository import UserRepository
@@ -38,12 +40,23 @@ def seed_users() -> None:
             if existing is not None:
                 print(f"[seed] skip — already exists: {entry['email']}")
                 continue
-            repo.create(
-                email=entry["email"],
-                name=entry["name"],
-                password_hash=hash_password(entry["password"]),
-                role=entry["role"],
-            )
+            try:
+                repo.create(
+                    email=entry["email"],
+                    name=entry["name"],
+                    password_hash=hash_password(entry["password"]),
+                    role=entry["role"],
+                )
+            except IntegrityError:
+                # The check above is not enough on its own. The api container
+                # seeds on startup, and a deploy script that also seeds can be
+                # running at the same moment — both see "absent", both insert,
+                # one loses on uq_users_email. The account exists either way,
+                # so this is a no-op, not a failure. Without this the deploy
+                # printed an alarming traceback for a healthy outcome.
+                db.rollback()
+                print(f"[seed] skip — created concurrently: {entry['email']}")
+                continue
             print(f"[seed] created: {entry['email']} ({entry['role']})")
     finally:
         db.close()
