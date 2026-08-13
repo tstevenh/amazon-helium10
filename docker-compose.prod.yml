@@ -1,0 +1,54 @@
+# Production overlay: HTTPS via Caddy.
+#
+# Used together with the base file, and WITHOUT docker-compose.override.yml
+# (which is dev-only and would replace the production build with `npm run dev`):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Caddy terminates TLS on 80/443 and forwards everything to the Next.js server,
+# which already proxies /backend to the API over the internal network. So the
+# API is never exposed to the internet directly — the only public ports are
+# Caddy's.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Losing this volume means
+      # re-requesting certificates, and Let's Encrypt rate-limits that.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    networks:
+      - ppc_net
+
+  frontend:
+    restart: unless-stopped
+    # Caddy reaches this over the Docker network, so no host port is published.
+    # Publishing 3000 would expose the app on http://IP:3000, bypassing TLS.
+    ports: !reset []
+
+  api:
+    restart: unless-stopped
+    ports: !reset []
+
+  worker:
+    restart: unless-stopped
+
+  beat:
+    restart: unless-stopped
+
+  postgres:
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

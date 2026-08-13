@@ -1,0 +1,44 @@
+# Caddy gets and renews a free Let's Encrypt certificate automatically, so long
+# as ads.comfecto.com resolves to this server and ports 80 and 443 are open.
+#
+# Everything goes to the Next.js server, which proxies /backend to the API over
+# the internal Docker network. The API is therefore never reachable from the
+# internet on its own.
+
+ads.comfecto.com {
+	encode gzip
+
+	# Amazon redirects the BROWSER here after OAuth, and this path is served by
+	# the API, not by Next.js. Without this route it would hit the frontend and
+	# 404, and connecting the Amazon account would be impossible.
+	handle /accounts/oauth/callback* {
+		reverse_proxy api:8000
+	}
+
+	# Amazon syncs are long — a report can take 20-40 minutes — and the app
+	# polls sync status over the same connection. The defaults would cut these
+	# off mid-request.
+	reverse_proxy frontend:3000 {
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	# This app is behind a login and holds advertising data; it has no reason
+	# to be indexed or embedded anywhere.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}

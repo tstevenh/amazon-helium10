@@ -127,9 +127,10 @@ services:
       # API_URL is the server-side destination for the Next.js rewrite proxy.
       # Inside Docker this must use the service name, not localhost.
       API_URL: http://api:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    # NO source mount here on purpose. Mounting ./frontend over /app hides the
+    # production build baked into the image by `npm run build`, so on a fresh
+    # clone (no .next on the host) `npm run start` has nothing to serve. The
+    # dev override adds the mount back for hot reload.
     depends_on:
       - api
     ports:

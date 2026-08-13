@@ -9,3 +9,8 @@ services:
     # The image builds a production bundle (npm run start). For local work we
     # want the dev server and its hot reload instead.
     command: ["npm", "run", "dev"]
+    # Source mounts live here, not in the base file: mounting over /app hides
+    # the image's production build, which breaks a server deploy.
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
