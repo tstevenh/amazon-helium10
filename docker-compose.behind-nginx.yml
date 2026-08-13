@@ -1,0 +1,41 @@
+# Production overlay for a server that ALREADY runs nginx.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.behind-nginx.yml up -d
+#
+# Use this instead of docker-compose.prod.yml when something else owns ports 80
+# and 443 — on the comfecto server that is nginx, fronting n8n and two other
+# sites. Starting Caddy there would fight over the ports and take n8n down.
+#
+# Only the frontend is published, and only on loopback, so nginx can reach it
+# while the internet cannot. The API is not published at all: the Next.js
+# server proxies /backend to it over the Docker network, and the host's port
+# 8000 is already occupied by an unrelated uvicorn process.
+services:
+  frontend:
+    restart: unless-stopped
+    # The base file already binds 127.0.0.1:3000, which is exactly what nginx
+    # needs. Left alone deliberately: `ports: !reset` followed by a list wipes
+    # the key entirely rather than replacing it, which silently left the
+    # frontend unreachable from nginx.
+
+  api:
+    restart: unless-stopped
+    # No host port. Reached as http://api:8000 inside the Docker network.
+    ports: !reset []
+
+  worker:
+    restart: unless-stopped
+
+  beat:
+    restart: unless-stopped
+
+  postgres:
+    restart: unless-stopped
+    # Deliberately unpublished. The server already runs another Postgres
+    # container on 5432; ours is only ever reached from inside this project's
+    # network, so it needs no host port and cannot collide.
+    ports: !reset []
+
+  redis:
+    restart: unless-stopped
+    ports: !reset []
