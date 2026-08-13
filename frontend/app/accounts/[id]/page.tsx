@@ -503,8 +503,19 @@ export default function AccountDetailPage() {
               </svg>
               <span className="font-medium">Syncing all data from Amazon Ads… (live counts update below)</span>
             </div>
+            {/* This used to promise "2–4 minutes", which was true when a sync
+                only fetched campaign lists. Performance data now comes from
+                Amazon reports, and Amazon builds each one on its own schedule —
+                measured at 23–40 minutes per report on a real account. Anyone
+                watching an honest hour-long sync against a 4-minute estimate
+                reasonably concludes it has hung. */}
             <p className="text-xs text-blue-600 mt-1 ml-6">
-              May take 2–4 minutes. Safe to navigate away — sync runs in the background.
+              Campaigns, ad groups and keywords land within a few minutes; the counts
+              above update as they arrive. Performance history is much slower — Amazon
+              builds each report on its own schedule, around 20–40 minutes each, so a
+              30-day pull often takes about an hour and 90 days can take several. This
+              is normal, not a stall. Safe to navigate away; the sync runs in the
+              background. Detailed progress is on Sync Monitor.
             </p>
           </div>
         )}
