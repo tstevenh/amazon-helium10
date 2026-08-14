@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     # A sync that silently never runs is as damaging as one that errors.
     sync_stale_after_hours: int = 24
     health_check_interval_minutes: int = 30
+    # A job left at queued/running for longer than this is orphaned: the
+    # worker died without reaching mark_failed. Must stay above Celery's hard
+    # task_time_limit (6h5m) so a slow-but-alive sync is never reaped.
+    #
+    # This matters more than it looks. has_active() counts queued|running and
+    # the router refuses a new sync while one is active, so an orphan does not
+    # merely spin the UI — it blocks every future sync for that account until
+    # someone edits the table by hand. A host reboot mid-sync did exactly that.
+    sync_orphan_after_hours: int = 7
     # Dayparting reconciles state rather than firing on edges, so this is the
     # error bound: a missed run means campaigns sit in the wrong state for at
     # most this long. Windows are whole hours, so 60 is the natural default.

@@ -9,13 +9,19 @@ import logging
 from datetime import datetime, timedelta, timezone as tz
 
 import requests
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal
 from app.modules.accounts.models import Credential, SellerAccount
 from app.modules.sync_jobs.models import SyncJob
-from app.modules.sync_jobs.repository import JOB_STATUS_SUCCESS, UNHEALTHY_STATUSES
+from app.modules.sync_jobs.repository import (
+    ACTIVE_STATUSES,
+    JOB_STATUS_FAILED,
+    JOB_STATUS_SUCCESS,
+    UNHEALTHY_STATUSES,
+)
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -44,6 +50,62 @@ def send_alert(message: str) -> bool:
     except Exception as exc:
         logger.error("[health] alert webhook failed: %s", exc)
         return False
+
+
+def reap_orphaned_jobs(db: Session, orphan_after_hours: int) -> list[dict]:
+    """Fail jobs left at queued/running by a worker that died.
+
+    The status machine assumes every job that starts also finishes — some task
+    reaches mark_completed or mark_failed. A hard stop (host reboot, OOM kill,
+    `docker compose down` mid-sync) breaks that: nothing runs, and the row says
+    'running' forever.
+
+    That is not cosmetic. has_active() counts queued|running and the sync
+    endpoint refuses to start a second sync while one is active, so a single
+    orphan silently blocks every future sync for that account. It also evades
+    collect_sync_health below, which only looks at jobs that *ended* unhealthy
+    — so the one condition that stops all syncs was the one nothing watched.
+
+    Time is the only safe signal. Reaping on worker startup would be wrong:
+    task_acks_late=True requeues in-flight tasks when a worker is lost, so a
+    job that is 'running' at boot may legitimately be about to resume. But
+    Celery's hard task_time_limit is 6h5m, so past orphan_after_hours (7 by
+    default) no live task can still exist, whatever the worker is doing.
+    """
+    cutoff = datetime.now(tz.utc) - timedelta(hours=orphan_after_hours)
+    # started_at is null for a job that was queued and never picked up — a
+    # worker that was down when the request arrived. Fall back to created_at
+    # so those are reaped too, rather than blocking syncs indefinitely.
+    orphans = (
+        db.query(SyncJob)
+        .filter(
+            SyncJob.status.in_(ACTIVE_STATUSES),
+            func.coalesce(SyncJob.started_at, SyncJob.created_at) < cutoff,
+        )
+        .all()
+    )
+    reaped = []
+    for job in orphans:
+        age = datetime.now(tz.utc) - (job.started_at or job.created_at)
+        job.status = JOB_STATUS_FAILED
+        job.finished_at = datetime.now(tz.utc)
+        job.error_message = (
+            f"Abandoned after {age.total_seconds() / 3600:.1f}h with no worker running. "
+            "The worker process stopped before the sync finished — usually a host "
+            "reboot or container restart mid-sync. No data was lost; re-run the sync."
+        )
+        reaped.append({
+            "job_id": str(job.id),
+            "account_id": str(job.seller_account_id),
+            "age_hours": round(age.total_seconds() / 3600, 1),
+        })
+        logger.warning(
+            "[health] reaped orphaned sync job %s (account %s, age %.1fh)",
+            job.id, job.seller_account_id, age.total_seconds() / 3600,
+        )
+    if reaped:
+        db.commit()
+    return reaped
 
 
 def collect_sync_health(db: Session, stale_after_hours: int) -> dict:
@@ -106,7 +168,12 @@ def check_sync_health() -> dict:
     """Beat-driven health check. Alerts only when something is wrong."""
     db = SessionLocal()
     try:
+        # Before assessing health, clear jobs whose worker died. Ordering
+        # matters: a reaped job becomes 'failed', so this run reports it and
+        # alerts on it, instead of it staying invisible at 'running'.
+        reaped = reap_orphaned_jobs(db, settings.sync_orphan_after_hours)
         result = collect_sync_health(db, settings.sync_stale_after_hours)
+        result["reaped_orphans"] = reaped
         if result["healthy"]:
             logger.info("[health] sync health OK")
             return result
