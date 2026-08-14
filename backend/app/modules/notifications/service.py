@@ -41,18 +41,58 @@ class NotificationService:
     def __init__(self, db: Session) -> None:
         self.db = db
 
+    def _recent_duplicate(self, event_type: str, subject: str) -> Optional[NotificationLog]:
+        """The most recent identical notification inside the dedupe window.
+
+        (event_type, subject) is the key rather than the body: health subjects
+        carry the counts ("2 failed, 1 stale"), so a subject that is unchanged
+        means the situation is unchanged, while a situation that worsens
+        changes the counts and alerts again immediately.
+        """
+        if settings.notification_dedupe_minutes <= 0:
+            return None
+        cutoff = datetime.now(tz.utc) - timedelta(minutes=settings.notification_dedupe_minutes)
+        return (
+            self.db.query(NotificationLog)
+            .filter(
+                NotificationLog.event_type == event_type,
+                NotificationLog.subject == subject[:300],
+                NotificationLog.sent_at >= cutoff,
+            )
+            .order_by(NotificationLog.sent_at.desc())
+            .first()
+        )
+
     def notify(
         self,
         event_type: str,
         subject: str,
         body: str,
         payload: Optional[dict[str, Any]] = None,
+        dedupe: bool = True,
     ) -> NotificationLog:
         """Record a notification, then try to deliver it.
 
         Recording first is deliberate: if delivery raises, the fact that the
         app noticed still survives.
+
+        Repeats of an identical (event_type, subject) inside
+        notification_dedupe_minutes are suppressed entirely — not recorded and
+        not delivered. Health checks re-report conditions that persist, so a
+        single stale account produced 47 identical rows in one day. Alerting
+        that cries wolf gets muted, and a muted channel fails silently, which
+        is what this whole module exists to prevent. Pass dedupe=False for
+        notifications that must always land regardless of repetition.
         """
+        if dedupe:
+            existing = self._recent_duplicate(event_type, subject)
+            if existing is not None:
+                logger.info(
+                    "[notify] suppressed duplicate %s within %dm: %s",
+                    event_type, settings.notification_dedupe_minutes, subject,
+                )
+                return existing
+
         row = NotificationLog(
             event_type=event_type,
             channel="slack" if settings.alert_webhook_url else None,

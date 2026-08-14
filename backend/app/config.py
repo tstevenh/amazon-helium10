@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     # merely spin the UI — it blocks every future sync for that account until
     # someone edits the table by hand. A host reboot mid-sync did exactly that.
     sync_orphan_after_hours: int = 7
+    # Suppress an identical notification repeated inside this window.
+    #
+    # Health checks run every 30 minutes and re-report conditions that persist,
+    # so one stale account produced 47 identical rows in 24 hours. Delivered to
+    # a real channel that is 47 messages for one problem — the team mutes it,
+    # and the app is back to failing silently, which is the exact thing the
+    # alerting was built to prevent. 6 hours still reminds; it does not spam.
+    notification_dedupe_minutes: int = 360
     # Dayparting reconciles state rather than firing on edges, so this is the
     # error bound: a missed run means campaigns sit in the wrong state for at
     # most this long. Windows are whole hours, so 60 is the natural default.

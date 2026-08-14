@@ -117,3 +117,60 @@ def test_email_channel_is_not_offered_by_the_api():
     field = RuleIn.model_fields["channel"]
     # Literal["slack"] — email must not be an accepted input value.
     assert "email" not in str(field.annotation)
+
+
+# ── Duplicate suppression ──────────────────────────────────────────────────
+# check_sync_health runs every 30 minutes and re-reports conditions that
+# persist. One stale account produced 47 identical sync_failed rows in 24
+# hours on the deployed instance. Delivered to a real channel that is 47
+# messages for one problem; the team mutes the channel, and the app is back to
+# failing silently — the exact failure this module was built to prevent.
+import inspect as _inspect
+
+from app.config import settings as _settings
+from app.modules.notifications import service as _svc
+
+
+def test_notify_accepts_a_dedupe_flag():
+    sig = _inspect.signature(_svc.NotificationService.notify)
+    assert "dedupe" in sig.parameters
+    assert sig.parameters["dedupe"].default is True, (
+        "suppression must be the default; opting in would not have helped here"
+    )
+
+
+def test_dedupe_keys_on_event_type_and_subject():
+    src = _inspect.getsource(_svc.NotificationService._recent_duplicate)
+    assert "NotificationLog.event_type" in src
+    assert "NotificationLog.subject" in src
+    assert "NotificationLog.body" not in src, (
+        "keying on body would re-alert on cosmetic changes and defeat the point"
+    )
+
+
+def test_dedupe_window_is_configurable_and_can_be_disabled():
+    assert hasattr(_settings, "notification_dedupe_minutes")
+    src = _inspect.getsource(_svc.NotificationService._recent_duplicate)
+    assert "<= 0" in src, "setting the window to 0 must disable suppression"
+
+
+def test_dedupe_window_is_longer_than_the_health_check_interval():
+    """A window shorter than the check interval suppresses nothing."""
+    assert _settings.notification_dedupe_minutes > _settings.health_check_interval_minutes
+
+
+def test_suppressed_duplicate_returns_the_original_row():
+    """Callers treat the return as 'the notification' — it must not be None."""
+    src = _inspect.getsource(_svc.NotificationService.notify)
+    assert "return existing" in src
+
+
+def test_suppression_happens_before_the_row_is_written():
+    """Suppressed means not recorded, not merely not delivered.
+
+    47 rows is noise on the Notifications screen too, not just in Slack.
+    """
+    src = _inspect.getsource(_svc.NotificationService.notify)
+    assert src.index("_recent_duplicate") < src.index("NotificationLog("), (
+        "deduping after the insert would still bury the screen in repeats"
+    )
