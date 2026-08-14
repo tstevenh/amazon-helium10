@@ -105,9 +105,12 @@ SELECT event_type, delivery_status, count(*), max(sent_at) AS latest
 FROM notification_log GROUP BY 1,2 ORDER BY 4 DESC NULLS LAST LIMIT 10;" 2>&1
 
 hdr "Errors in the worker (last 2h)"
+# Success lines carry "'errors': []" and "errors=0", so a naive grep for
+# "error" reports a clean sync as four errors — directly above a line saying
+# "empty means no errors". A report that cries wolf gets skimmed.
 $COMPOSE logs worker --since 2h 2>&1 \
   | grep -iE 'error|traceback|exception|failed|critical' \
-  | grep -viE 'error_message|0 errors' | tail -25
+  | grep -viE "error_message|'errors': \[\]|errors=0|0 errors|soft_deleted" | tail -25
 echo "(empty above = no errors)"
 
 hdr "Errors in the API (last 2h)"
