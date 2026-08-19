@@ -222,6 +222,37 @@ Three further traps in that code:
   because rows may exist, but the API rejects it and the UI drops it. Do not
   revive it; it has no executor.
 
+### Rule scoping: empty means everything, and the response must say so
+
+A rule limited to nothing runs across the whole marketplace, which is how every
+rule behaved before scoping was reachable. `rule_campaign_scope` shipped in P4-4
+and `RuleEngine.execute` always filtered on it — but no endpoint ever accepted
+`campaign_ids`, so the table could not be populated and the feature was dead end
+to end while looking implemented. `rule_ad_group_scope` (025) narrows further,
+because one campaign's ad groups target completely different keywords.
+
+Four things here are easy to get wrong:
+
+- **`None` and `[]` mean different things on update.** None leaves a scope alone;
+  `[]` clears it. A single optional list cannot express both, and silently
+  widening a rule to the whole marketplace on an unrelated edit is the worse
+  default.
+- **Return `_with_scope(db, rule)`, never the bare ORM row.** `RuleResponse`
+  defaults `campaign_ids` to `[]` and `Rule` has no such attribute, so returning
+  `rule` reported an empty scope on every update/enable/disable while the tables
+  were untouched. A UI trusting that response would show the scope as cleared and
+  could save it back — a display bug becoming real data loss.
+- **Clone must copy the scope.** Without it, "Copy of" a rule limited to one
+  campaign ran over the entire marketplace, and clones start disabled so nobody
+  would notice until they enabled it.
+- **Ad-group scope is refused on `budget` and `placement`.** Amazon holds the
+  budget and the placement adjustments on the campaign, so the engine reads
+  campaign totals and never looks at ad groups; storing one would be ignored.
+
+Verified live: the same rule evaluated 16 rows scoped to one ad group, 53 scoped
+to its campaign, and 71 unscoped — and 16 matched the ad group's own search-term
+count from the Search Terms API.
+
 ### Adding a rule type touches five places
 
 Rule types are `negative | harvest | bid | budget | placement`. Adding one means

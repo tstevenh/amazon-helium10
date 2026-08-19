@@ -282,6 +282,9 @@ export interface Rule {
   created_at:         string
   updated_at:         string
   deleted_at:         string | null
+  /** What the rule is limited to. Empty = the whole marketplace. */
+  campaign_ids?: string[]
+  ad_group_ids?: string[]
 }
 
 export interface RuleExecution {

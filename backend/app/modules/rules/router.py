@@ -25,7 +25,10 @@ from app.modules.auth.models import User
 from app.modules.audit_log.repository import AuditLogRepository
 from sqlalchemy import func
 
-from app.modules.rules.models import RuleTemplate
+from app.modules.campaigns.models import AdGroup, Campaign
+from app.modules.rules.models import (
+    RuleAdGroupScope, RuleCampaignScope, RuleTemplate,
+)
 from app.modules.rules.repository import RuleRepository, RuleExecutionRepository
 from app.modules.rules.schemas import (
     RuleTemplateCreate,
@@ -66,8 +69,112 @@ def list_rules(
     db:       Session = Depends(get_db),
     _user:    User    = Depends(get_current_user),
 ) -> list[RuleResponse]:
-    return RuleRepository(db).get_all(profile_id, include_disabled=include_disabled)
+    rules = RuleRepository(db).get_all(profile_id, include_disabled=include_disabled)
+    return [_with_scope(db, r) for r in rules]
 
+
+
+# ── Scoping ────────────────────────────────────────────────────────────────────
+# Empty scope means "the whole marketplace", which is how every rule behaved
+# before this was reachable. rule_campaign_scope shipped in P4-4 and the engine
+# always honoured it, but nothing could write to it, so the feature was dead end
+# to end while appearing implemented.
+
+_CAMPAIGN_LEVEL_TYPES = ("budget", "placement")
+
+
+def _validate_scope(
+    db: Session, rule_type: str, profile_id: uuid.UUID,
+    campaign_ids: list[uuid.UUID], ad_group_ids: list[uuid.UUID],
+) -> None:
+    """Reject a scope the engine could not honour, rather than storing it.
+
+    An ad-group scope on a budget rule is the important case: an Amazon budget
+    belongs to a campaign, so the engine reads campaign totals and never looks
+    at ad groups. Accepting it would give the operator a rule that quietly
+    ignored half of what they configured.
+    """
+    if ad_group_ids and rule_type in _CAMPAIGN_LEVEL_TYPES:
+        raise HTTPException(
+            400,
+            f"{rule_type} rules act on whole campaigns, so they cannot be scoped "
+            f"to ad groups. Amazon holds the budget and the placement adjustments "
+            f"on the campaign, not the ad group. Scope by campaign instead.",
+        )
+
+    if campaign_ids:
+        found = db.query(Campaign).filter(
+            Campaign.id.in_(campaign_ids), Campaign.deleted_at.is_(None),
+        ).all()
+        by_id = {c.id: c for c in found}
+        for cid in campaign_ids:
+            c = by_id.get(cid)
+            if c is None:
+                raise HTTPException(400, f"Campaign {cid} not found")
+            if c.profile_id != profile_id:
+                raise HTTPException(
+                    400,
+                    f"Campaign '{c.name}' belongs to a different marketplace than "
+                    f"this rule",
+                )
+
+    if ad_group_ids:
+        rows = (
+            db.query(AdGroup, Campaign)
+            .join(Campaign, Campaign.id == AdGroup.campaign_id)
+            .filter(AdGroup.id.in_(ad_group_ids), AdGroup.deleted_at.is_(None))
+            .all()
+        )
+        by_id = {ag.id: (ag, c) for ag, c in rows}
+        for gid in ad_group_ids:
+            pair = by_id.get(gid)
+            if pair is None:
+                raise HTTPException(400, f"Ad group {gid} not found")
+            ag, camp = pair
+            if camp.profile_id != profile_id:
+                raise HTTPException(
+                    400,
+                    f"Ad group '{ag.name}' belongs to a different marketplace than "
+                    f"this rule",
+                )
+            # An ad group outside the campaign scope would match nothing, and the
+            # rule would look broken rather than misconfigured.
+            if campaign_ids and camp.id not in set(campaign_ids):
+                raise HTTPException(
+                    400,
+                    f"Ad group '{ag.name}' is in campaign '{camp.name}', which is "
+                    f"not in this rule's campaign scope. Add that campaign, or "
+                    f"remove the ad group.",
+                )
+
+
+def _replace_scope(
+    db: Session, rule_id: uuid.UUID,
+    campaign_ids: Optional[list[uuid.UUID]], ad_group_ids: Optional[list[uuid.UUID]],
+) -> None:
+    """None leaves a scope untouched; [] clears it."""
+    if campaign_ids is not None:
+        db.query(RuleCampaignScope).filter(RuleCampaignScope.rule_id == rule_id).delete()
+        for cid in dict.fromkeys(campaign_ids):     # de-dupe, keep order
+            db.add(RuleCampaignScope(rule_id=rule_id, campaign_id=cid))
+    if ad_group_ids is not None:
+        db.query(RuleAdGroupScope).filter(RuleAdGroupScope.rule_id == rule_id).delete()
+        for gid in dict.fromkeys(ad_group_ids):
+            db.add(RuleAdGroupScope(rule_id=rule_id, ad_group_id=gid))
+
+
+def _with_scope(db: Session, rule) -> RuleResponse:
+    """A rule always reports what it is limited to, so the UI need not guess."""
+    out = RuleResponse.model_validate(rule)
+    out.campaign_ids = [
+        r.campaign_id for r in db.query(RuleCampaignScope)
+        .filter(RuleCampaignScope.rule_id == rule.id).all()
+    ]
+    out.ad_group_ids = [
+        r.ad_group_id for r in db.query(RuleAdGroupScope)
+        .filter(RuleAdGroupScope.rule_id == rule.id).all()
+    ]
+    return out
 
 # ── Create ─────────────────────────────────────────────────────────────────────
 
@@ -77,6 +184,8 @@ def create_rule(
     db:    Session = Depends(get_db),
     _user: User    = Depends(get_current_user),
 ) -> RuleResponse:
+    _validate_scope(db, body.rule_type, body.profile_id,
+                    body.campaign_ids, body.ad_group_ids)
     rule = RuleRepository(db).create(dict(
         profile_id         = body.profile_id,
         name               = body.name,
@@ -86,10 +195,14 @@ def create_rule(
         configuration_json = body.configuration_json,
         created_by         = _user.id,
     ))
+    _replace_scope(db, rule.id, body.campaign_ids, body.ad_group_ids)
     db.commit()
-    _audit(db, _user.id, rule.id, "rule_created", {"name": rule.name, "rule_type": rule.rule_type})
+    _audit(db, _user.id, rule.id, "rule_created", {
+        "name": rule.name, "rule_type": rule.rule_type,
+        "campaigns": len(body.campaign_ids), "ad_groups": len(body.ad_group_ids),
+    })
     db.commit()
-    return rule
+    return _with_scope(db, rule)
 
 
 # ── Get ────────────────────────────────────────────────────────────────────────
@@ -103,7 +216,7 @@ def get_rule(
     rule = RuleRepository(db).get_by_id(rule_id)
     if not rule:
         raise HTTPException(404, "Rule not found")
-    return rule
+    return _with_scope(db, rule)
 
 
 # ── Update ─────────────────────────────────────────────────────────────────────
@@ -120,12 +233,27 @@ def update_rule(
     if not rule:
         raise HTTPException(404, "Rule not found")
 
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Scope is stored in its own tables, so it must not be passed to the rule
+    # row update — SQLAlchemy would raise on an unknown attribute.
+    payload = body.model_dump()
+    campaign_ids = payload.pop("campaign_ids", None)
+    ad_group_ids = payload.pop("ad_group_ids", None)
+    updates = {k: v for k, v in payload.items() if v is not None}
+    _validate_scope(
+        db, updates.get("rule_type", rule.rule_type), rule.profile_id,
+        campaign_ids or [], ad_group_ids or [],
+    )
     rule = repo.update(rule, updates)
+    _replace_scope(db, rule.id, campaign_ids, ad_group_ids)
     db.commit()
     _audit(db, _user.id, rule.id, "rule_updated", {"fields": list(updates.keys())})
     db.commit()
-    return rule
+    # _with_scope, not the bare ORM object: RuleResponse defaults campaign_ids to
+    # [] and the Rule row has no such attribute, so returning `rule` reported an
+    # empty scope on every update while the tables were untouched. A UI trusting
+    # that response would show the scope as cleared and could save it back —
+    # turning a display bug into real data loss.
+    return _with_scope(db, rule)
 
 
 # ── Delete (soft) ──────────────────────────────────────────────────────────────
@@ -159,13 +287,28 @@ def clone_rule(
     if not rule:
         raise HTTPException(404, "Rule not found")
     cloned = repo.clone(rule, f"Copy of {rule.name}", _user.id)
+    db.flush()
+    # Carry the scope across. Without this, cloning a rule limited to one
+    # campaign produced a rule that ran over the entire marketplace — silently,
+    # and the clone starts disabled so nobody would notice until they enabled it.
+    src_campaigns = [
+        r.campaign_id for r in db.query(RuleCampaignScope)
+        .filter(RuleCampaignScope.rule_id == rule.id).all()
+    ]
+    src_ad_groups = [
+        r.ad_group_id for r in db.query(RuleAdGroupScope)
+        .filter(RuleAdGroupScope.rule_id == rule.id).all()
+    ]
+    _replace_scope(db, cloned.id, src_campaigns, src_ad_groups)
     db.commit()
     _audit(db, _user.id, cloned.id, "rule_cloned", {
         "source_rule_id": str(rule_id),
         "name": cloned.name,
+        "campaigns": len(src_campaigns),
+        "ad_groups": len(src_ad_groups),
     })
     db.commit()
-    return cloned
+    return _with_scope(db, cloned)
 
 
 # ── Enable / Disable ───────────────────────────────────────────────────────────
@@ -184,7 +327,7 @@ def enable_rule(
     db.commit()
     _audit(db, _user.id, rule_id, "rule_enabled", {})
     db.commit()
-    return rule
+    return _with_scope(db, rule)
 
 
 @rules_router.post("/{rule_id}/disable", response_model=RuleResponse)
@@ -201,7 +344,7 @@ def disable_rule(
     db.commit()
     _audit(db, _user.id, rule_id, "rule_disabled", {})
     db.commit()
-    return rule
+    return _with_scope(db, rule)
 
 
 # ── Execute ────────────────────────────────────────────────────────────────────

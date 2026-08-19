@@ -54,6 +54,27 @@ class RuleCampaignScope(Base):
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
 
+
+class RuleAdGroupScope(Base):
+    """Restricts a rule to specific ad groups.
+
+    No rows means "every ad group allowed by the campaign scope", which is how
+    every rule behaved before this existed.
+
+    Only meaningful for rule types that evaluate search terms — negative,
+    harvest and bid. An Amazon budget belongs to a campaign and placement
+    adjustments are campaign-level, so the API refuses an ad-group scope on
+    those rather than storing one it would then ignore.
+    """
+    __tablename__ = "rule_ad_group_scope"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    rule_id = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="CASCADE"),
+                     nullable=False)
+    ad_group_id = Column(UUID(as_uuid=True), ForeignKey("ad_groups.id", ondelete="CASCADE"),
+                         nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
 class RuleTemplate(Base):
     """A starting point for a new rule.
 

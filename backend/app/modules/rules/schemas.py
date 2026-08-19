@@ -30,9 +30,17 @@ class RuleCreate(BaseModel):
     profile_id:         uuid.UUID
     name:               str
     description:        Optional[str]         = None
-    rule_type:          str                   # negative | harvest | bid
+    rule_type:          str                   # negative | harvest | bid | budget | placement
     status:             str                   = "enabled"
     configuration_json: dict[str, Any]
+
+# Scoping. Empty lists mean "everything in the marketplace", which is how every
+# rule behaved before scoping was reachable. rule_campaign_scope has existed
+# since P4-4 and the engine always filtered on it, but no endpoint accepted
+# campaign_ids — so the table could never be populated and the feature was dead
+# from end to end while looking implemented.
+    campaign_ids:       list[uuid.UUID]       = Field(default_factory=list)
+    ad_group_ids:       list[uuid.UUID]       = Field(default_factory=list)
 
 
 class RuleUpdate(BaseModel):
@@ -41,6 +49,11 @@ class RuleUpdate(BaseModel):
     rule_type:          Optional[str]         = None
     status:             Optional[str]         = None
     configuration_json: Optional[dict[str, Any]] = None
+    # None means "leave the scope as it is"; [] means "clear it". A single
+    # optional list cannot express both, and silently widening a rule to the
+    # whole marketplace on an unrelated edit would be the worse default.
+    campaign_ids:       Optional[list[uuid.UUID]] = None
+    ad_group_ids:       Optional[list[uuid.UUID]] = None
 
 
 class RuleResponse(BaseModel):
@@ -57,6 +70,10 @@ class RuleResponse(BaseModel):
     created_at:         datetime
     updated_at:         datetime
     deleted_at:         Optional[datetime]    = None
+    # Populated by the router from the scope tables, so a rule always reports
+    # what it is actually limited to rather than leaving the UI to guess.
+    campaign_ids:       list[uuid.UUID]       = Field(default_factory=list)
+    ad_group_ids:       list[uuid.UUID]       = Field(default_factory=list)
 
 
 # ── Execution schemas ──────────────────────────────────────────────────────────

@@ -346,6 +346,10 @@ export const api = {
     rule_type: string
     status?: string
     configuration_json: Record<string, unknown>
+    /** Empty means the whole marketplace, which is how rules behaved before
+     *  scoping was reachable. */
+    campaign_ids?: string[]
+    ad_group_ids?: string[]
   }) =>
     request<Rule>('/rules', {
       method: 'POST',
@@ -361,6 +365,9 @@ export const api = {
     rule_type?: string
     status?: string
     configuration_json?: Record<string, unknown>
+    /** Omit to leave a scope untouched; [] clears it. */
+    campaign_ids?: string[]
+    ad_group_ids?: string[]
   }) =>
     request<Rule>(`/rules/${id}`, {
       method: 'PUT',

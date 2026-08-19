@@ -55,7 +55,7 @@ from app.modules.suggestions.models import Suggestion
 from app.modules.suggestions.repository import SuggestionRepository
 from app.modules.suggestions.asin import asin_safe_suggestion_type
 from app.modules.campaigns.models import Campaign, Target
-from app.modules.rules.models import Rule, RuleCampaignScope
+from app.modules.rules.models import Rule, RuleAdGroupScope, RuleCampaignScope
 from app.modules.rules.repository import RuleExecutionRepository
 
 logger = logging.getLogger(__name__)
@@ -166,6 +166,13 @@ class RuleEngine:
                 r.campaign_id for r in self.db.query(RuleCampaignScope)
                 .filter(RuleCampaignScope.rule_id == rule.id).all()
             ]
+            # Ad-group scope narrows within the campaign scope. Only search-term
+            # rules can honour it: budgets and placements are campaign-level, so
+            # the API refuses the combination rather than ignoring it here.
+            scoped_ad_groups = [
+                r.ad_group_id for r in self.db.query(RuleAdGroupScope)
+                .filter(RuleAdGroupScope.rule_id == rule.id).all()
+            ]
             # Budget rules operate on campaign totals, not on search terms:
             # a budget belongs to a campaign, and no search term has one.
             if rule.rule_type == "budget":
@@ -178,9 +185,11 @@ class RuleEngine:
                     date_from    = date_from,
                     date_to      = date.today(),
                     campaign_ids = scoped_ids or None,
+                    ad_group_ids = scoped_ad_groups or None,
                 )
-            if scoped_ids:
-                logger.info("[rules] rule=%s scoped to %d campaigns", rule.id, len(scoped_ids))
+            if scoped_ids or scoped_ad_groups:
+                logger.info("[rules] rule=%s scoped to %d campaigns, %d ad groups",
+                            rule.id, len(scoped_ids), len(scoped_ad_groups))
 
             rows_evaluated = len(rows)
             created_count  = 0

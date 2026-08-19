@@ -19,8 +19,7 @@ import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
 import type {
   Rule, RuleExecution, ExecuteRuleResponse, RuleConfiguration, RuleCondition,
-  Profile, RuleTemplate,
-} from '@/lib/types'
+  Profile, RuleTemplate, AdGroup, Campaign } from '@/lib/types'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -289,6 +288,168 @@ function ConditionRow({
 
 type FormMode = 'create' | 'edit'
 
+/**
+ * Which campaigns and ad groups a rule is allowed to act on.
+ *
+ * Empty means the whole marketplace — the behaviour every rule had before this
+ * was reachable, so existing rules are unaffected. rule_campaign_scope has
+ * existed since P4-4 and the engine always filtered on it, but no endpoint
+ * accepted the ids, so nothing could ever be scoped.
+ *
+ * Ad groups are the point of the request: one campaign's ad groups target
+ * completely different keywords and ASINs, so "negative anything over 60% ACoS
+ * in this campaign" is too blunt when one ad group harvests broad and another
+ * runs exact.
+ */
+function ScopePicker({
+  campaigns, adGroups, campaignIds, adGroupIds, onChange, allowAdGroups,
+}: {
+  campaigns: Campaign[]
+  adGroups: AdGroup[]
+  campaignIds: string[]
+  adGroupIds: string[]
+  onChange: (next: { campaign_ids: string[]; ad_group_ids: string[] }) => void
+  allowAdGroups: boolean
+}) {
+  const [tab, setTab] = useState<'campaigns' | 'adgroups'>('campaigns')
+  const [q, setQ] = useState('')
+
+  const campSet = new Set(campaignIds)
+  const agSet = new Set(adGroupIds)
+
+  // Only ad groups inside the chosen campaigns. Offering all of them would let
+  // an operator pick one the API then rejects, and with no campaign chosen the
+  // list would be the entire marketplace.
+  const selectableAdGroups = useMemo(() => {
+    const pool = campaignIds.length
+      ? adGroups.filter(g => campSet.has(g.campaign_id))
+      : adGroups
+    const needle = q.trim().toLowerCase()
+    return pool
+      .filter(g => !needle || g.name.toLowerCase().includes(needle))
+      .slice(0, 300)
+  }, [adGroups, campaignIds, q]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visibleCampaigns = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return campaigns.filter(c => !needle || c.name.toLowerCase().includes(needle)).slice(0, 300)
+  }, [campaigns, q])
+
+  function toggleCampaign(id: string) {
+    const next = new Set(campSet)
+    if (next.has(id)) {
+      next.delete(id)
+      // Dropping a campaign must drop its ad groups too, or the rule would
+      // carry an ad-group scope the API refuses on save.
+      const orphaned = new Set(adGroups.filter(g => g.campaign_id === id).map(g => g.id))
+      onChange({
+        campaign_ids: [...next],
+        ad_group_ids: adGroupIds.filter(g => !orphaned.has(g)),
+      })
+      return
+    }
+    next.add(id)
+    onChange({ campaign_ids: [...next], ad_group_ids: adGroupIds })
+  }
+
+  function toggleAdGroup(id: string) {
+    const next = new Set(agSet)
+    next.has(id) ? next.delete(id) : next.add(id)
+    onChange({ campaign_ids: campaignIds, ad_group_ids: [...next] })
+  }
+
+  const scopeSummary = campaignIds.length === 0 && adGroupIds.length === 0
+    ? 'Every campaign in this marketplace'
+    : [
+        campaignIds.length ? `${campaignIds.length} campaign${campaignIds.length === 1 ? '' : 's'}` : null,
+        adGroupIds.length ? `${adGroupIds.length} ad group${adGroupIds.length === 1 ? '' : 's'}` : null,
+      ].filter(Boolean).join(' · ')
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <div>
+          <p className="text-sm font-medium text-gray-800">Apply this rule to</p>
+          <p className="text-xs text-gray-500">{scopeSummary}</p>
+        </div>
+        {(campaignIds.length > 0 || adGroupIds.length > 0) && (
+          <button type="button" className="text-xs text-blue-600 hover:underline"
+                  onClick={() => onChange({ campaign_ids: [], ad_group_ids: [] })}>
+            Clear — run on everything
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1 mb-2 text-xs">
+        <button type="button" onClick={() => setTab('campaigns')}
+                className={`px-2 py-1 rounded ${tab === 'campaigns'
+                  ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300'}`}>
+          Campaigns{campaignIds.length ? ` (${campaignIds.length})` : ''}
+        </button>
+        <button type="button" onClick={() => setTab('adgroups')} disabled={!allowAdGroups}
+                title={allowAdGroups ? undefined
+                  : 'Budget and placement live on the campaign in Amazon, not the ad group'}
+                className={`px-2 py-1 rounded disabled:opacity-40 ${tab === 'adgroups'
+                  ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300'}`}>
+          Ad Groups{adGroupIds.length ? ` (${adGroupIds.length})` : ''}
+        </button>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…"
+               className="input text-xs py-1 px-2 ml-auto w-40" />
+      </div>
+
+      {!allowAdGroups && (
+        <p className="text-xs text-gray-500 mb-2">
+          Amazon holds the budget and the placement adjustments on the campaign,
+          so this rule type can only be scoped by campaign.
+        </p>
+      )}
+
+      <div className="max-h-52 overflow-y-auto border border-gray-100 rounded">
+        {tab === 'campaigns' ? (
+          visibleCampaigns.length === 0 ? (
+            // "No campaigns match" was shown before a marketplace was chosen,
+            // which blames the search box for a different problem.
+            <p className="text-xs text-gray-400 p-3">
+              {campaigns.length === 0
+                ? 'Choose a marketplace for this rule first — campaigns belong to one marketplace.'
+                : 'No campaigns match that search.'}
+            </p>
+          ) : visibleCampaigns.map(c => (
+            <label key={c.id}
+                   className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-gray-50 cursor-pointer">
+              <input type="checkbox" checked={campSet.has(c.id)}
+                     onChange={() => toggleCampaign(c.id)} />
+              <span className="truncate" title={c.name}>{c.name}</span>
+              <span className="ml-auto text-gray-400 shrink-0">{c.status}</span>
+            </label>
+          ))
+        ) : selectableAdGroups.length === 0 ? (
+          <p className="text-xs text-gray-400 p-3">
+            {campaignIds.length === 0
+              ? 'Pick a campaign first, or search to narrow this list.'
+              : 'No ad groups in the selected campaigns match.'}
+          </p>
+        ) : selectableAdGroups.map(g => (
+          <label key={g.id}
+                 className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" checked={agSet.has(g.id)}
+                   onChange={() => toggleAdGroup(g.id)} />
+            <span className="truncate" title={g.name}>{g.name}</span>
+          </label>
+        ))}
+      </div>
+
+      {adGroupIds.length > 0 && campaignIds.length === 0 && (
+        <p className="text-xs text-amber-700 mt-2">
+          Ad groups are selected with no campaign chosen. Add their campaigns too —
+          the API refuses an ad group outside the campaign scope, because it would
+          match nothing and the rule would look broken rather than misconfigured.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function RuleModal({
   mode,
   initial,
@@ -317,6 +478,14 @@ function RuleModal({
   const [name,        setName]        = useState(initial?.name ?? seed?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? seed?.description ?? '')
   const [ruleType,    setRuleType]    = useState<string>(initial?.rule_type ?? seed?.rule_type ?? 'negative')
+  // Scope. Empty = the whole marketplace, matching how rules behaved before.
+  const [campaignIds, setCampaignIds] = useState<string[]>(initial?.campaign_ids ?? [])
+  const [adGroupIds,  setAdGroupIds]  = useState<string[]>(initial?.ad_group_ids ?? [])
+  const [scopeCampaigns, setScopeCampaigns] = useState<Campaign[]>([])
+  const [scopeAdGroups,  setScopeAdGroups]  = useState<AdGroup[]>([])
+  // Budget and placement act on whole campaigns in Amazon, so an ad-group scope
+  // there would be stored and then ignored; the API rejects it.
+  const allowAdGroups = ruleType !== 'budget' && ruleType !== 'placement'
   const [status,      setStatus]      = useState<string>(initial?.status ?? 'enabled')
   const [config,      setConfig]      = useState<RuleConfiguration>(
     initial?.configuration_json
@@ -371,6 +540,8 @@ function RuleModal({
         rule_type:          ruleType,
         status,
         configuration_json: config as unknown as Record<string, unknown>,
+        campaign_ids:       campaignIds,
+        ad_group_ids:       allowAdGroups ? adGroupIds : [],
       }
       if (mode === 'create') {
         saved = await api.createRule(payload)
@@ -381,6 +552,8 @@ function RuleModal({
           rule_type:          payload.rule_type,
           status:             payload.status,
           configuration_json: payload.configuration_json,
+          campaign_ids:       payload.campaign_ids,
+          ad_group_ids:       payload.ad_group_ids,
         })
       }
       onSave(saved)
@@ -390,6 +563,18 @@ function RuleModal({
       setSaving(false)
     }
   }
+
+  useEffect(() => {
+    api.listCampaigns().then(all => setScopeCampaigns(
+      all.filter(c => c.profile_id === pickedProfile))).catch(() => {})
+    api.listAdGroups().then(setScopeAdGroups).catch(() => {})
+  }, [pickedProfile])
+
+  // Switching to a campaign-level type drops any ad-group scope, so the form
+  // cannot submit a combination the API refuses.
+  useEffect(() => {
+    if (!allowAdGroups && adGroupIds.length > 0) setAdGroupIds([])
+  }, [allowAdGroups, adGroupIds.length])
 
   const suggOptions = SUGGESTION_TYPES[ruleType] ?? []
 
@@ -480,6 +665,19 @@ function RuleModal({
                 </select>
               </div>
             </div>
+
+            {/* Scope — which campaigns / ad groups this rule may act on */}
+            <ScopePicker
+              campaigns={scopeCampaigns}
+              adGroups={scopeAdGroups}
+              campaignIds={campaignIds}
+              adGroupIds={adGroupIds}
+              allowAdGroups={allowAdGroups}
+              onChange={next => {
+                setCampaignIds(next.campaign_ids)
+                setAdGroupIds(next.ad_group_ids)
+              }}
+            />
 
             {/* Conditions */}
             <div>

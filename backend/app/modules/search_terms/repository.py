@@ -133,6 +133,7 @@ class SearchTermRepository:
         date_from: date,
         date_to: date,
         campaign_ids: Optional[list[uuid.UUID]] = None,
+        ad_group_ids: Optional[list[uuid.UUID]] = None,
     ) -> list[dict]:
         """Return search terms aggregated per (profile, search_term) — across all campaigns/ad groups.
 
@@ -176,6 +177,11 @@ class SearchTermRepository:
               -- rule behaved before scoping existed.
               AND (:campaign_ids IS NULL
                    OR st.campaign_id::TEXT = ANY(:campaign_ids))
+              -- Ad-group scope narrows further. One campaign's ad groups target
+              -- completely different keywords, so a campaign-level rule is too
+              -- blunt when one ad group harvests broad and another runs exact.
+              AND (:ad_group_ids IS NULL
+                   OR st.ad_group_id::TEXT = ANY(:ad_group_ids))
             GROUP BY st.search_term
             ORDER BY SUM(st.cost) DESC
         """)
@@ -185,6 +191,7 @@ class SearchTermRepository:
             "date_from": date_from,
             "date_to": date_to,
             "campaign_ids": [str(c) for c in campaign_ids] if campaign_ids else None,
+            "ad_group_ids": [str(g) for g in ad_group_ids] if ad_group_ids else None,
         }
         rows = self.db.execute(sql, params).mappings().all()
         return [dict(r) for r in rows]
