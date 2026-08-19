@@ -497,13 +497,56 @@ All three were found by a direct question about whether the *dashboard* had
 been verified, not by any test. The rule that follows: **verifying the engine
 is not verifying the feature.**
 
+
+## ✅ 2026-08-19: dayparting bid writes proven against the live account
+
+`AMAZON_WRITE_ENABLED` was turned on deliberately, scoped to one campaign
+(`ZZ-API-TEST-DO-NOT-USE`, one exact-match keyword `zzapitestdonotuse` with no
+realistic search volume), and turned off again afterwards. Every assertion below
+was read back **from Amazon**, not from our own database — the local mirror
+agreeing with itself proves nothing.
+
+Baseline read from Amazon first: `bid=0.75`, `state=ENABLED`.
+
+| What was tested | Result |
+|---|---|
+| Campaign state write (`PAUSED` → `ENABLED`) | Amazon confirmed |
+| Dayparting bid write, `decrease_bid 20%` | Amazon reported **0.60** = 0.75 × 0.80 |
+| **Re-running the same window** | Amazon still **0.60**, `changed: 0` — no compounding, no wasted write |
+| No bid window active | Amazon reported **0.75** — baseline restored |
+| A bid changed outside the app (set to 0.99 directly) | Amazon kept **0.99**; the target was released and a `dayparting_released` notification recorded |
+
+The third row is the one that mattered. Reconciliation re-asserts the desired
+state hourly, so an implementation that applied "−20%" to the *current* bid
+would have produced 0.48 on the second run and roughly 0.17 by end of day. It
+produced 0.60 both times, which is what the stored baseline is for.
+
+The fifth row is the safety property: the app did not overwrite a human. The
+release reason it recorded reads *"bid is 0.99 but this schedule last wrote 0.60
+— changed outside the app, so the schedule stopped managing it"*.
+
+Audit trail written as designed: `change_log` gained one `target`/`bid`
+`0.75 → 0.60` row with `source=dayparting`, `dayparting_bid_state` held
+`baseline_bid=0.75, last_written_bid=0.60`, and `dayparting_runs` recorded
+`applied` with a readable explanation.
+
+**Restored afterwards, and verified from Amazon:** bid back to `0.75`, campaign
+back to `paused`, temporary schedule deleted, `dayparting_bid_state` empty,
+`AMAZON_WRITE_ENABLED=false` confirmed in the running process (not merely in
+`.env` — `docker compose restart` would not have reloaded it).
+
+Caveat worth keeping in mind: this proved **one** keyword. It did not exercise
+the per-run write cap, partial failures across many keywords, or Amazon's
+rate limits, all of which only appear at scale. Enable a bid window on a real
+campaign with a small keyword count first.
+
+---
 ### Still unproven, and why
 
-- Only **keyword-bid** writes have ever reached Amazon. Budget, campaign state
-  and placement writes are built, guarded and unit-tested but have never
-  executed for real.
-- **Dayparting has never written anything** — writes were off during its test.
-  Its refusal path is verified, its success path is not.
+- Only **keyword-bid** writes had ever reached Amazon. **Campaign state and
+  dayparting bid writes were proven live on 2026-08-19** (below). Budget and
+  placement writes are built, guarded and unit-tested but have never executed
+  for real.
 - **The Cerebro parser has never seen a real export.** It was verified against
   a deliberately messy file written to look like one. The alias table comes
   from Helium 10's documentation, and the two-step import exists so a header

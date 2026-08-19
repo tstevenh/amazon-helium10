@@ -180,6 +180,12 @@ human approving each occurrence, so its design is deliberate:
 - Schedules are created inactive. Activation is a separate endpoint so the
   audit trail records who accepted the unattended behaviour.
 
+Proven live on 2026-08-19 against one test keyword: 0.75 → 0.60 on a −20%
+window, still 0.60 after a second run (no compounding), back to 0.75 outside the
+window, and a manual edit to 0.99 was left alone with the target released. See
+`docs/HANDOVER.md`. Untested at scale: the per-run write cap and partial
+failures across many keywords.
+
 **Bid windows must derive from a stored baseline, never from the current bid.**
 `action_type` is `pause | enable | decrease_bid | increase_bid`. Because the
 executor reconciles hourly, applying "−20%" to whatever the bid happens to be
