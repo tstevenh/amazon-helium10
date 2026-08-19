@@ -287,12 +287,88 @@ function ImportPanel({ onImported }: { onImported: (msg: string) => void }) {
   )
 }
 
+
+/**
+ * One snapshot's keyword rows.
+ *
+ * The endpoint behind this existed from the first version and nothing ever
+ * called it, so Snapshot History listed imports without letting anyone open
+ * one. Importing a second file then looked like it had overwritten the first,
+ * when in fact the first was still stored and is what the trend patterns
+ * compare against.
+ */
+function SnapshotDetail({
+  snapshot, onBack,
+}: { snapshot: KiSnapshot; onBack: () => void }) {
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
+  const [search, setSearch] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // Debounced so typing does not fire a request per keystroke against a
+  // snapshot that can hold thousands of rows.
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const t = setTimeout(() => {
+      api.kiSnapshotKeywords(snapshot.id, { search: search.trim() || undefined, limit: 2000 })
+        .then(r => { if (!cancelled) { setRows(r); setErr(null) } })
+        .catch(e => { if (!cancelled) setErr(e instanceof ApiError ? e.message : 'Failed to load') })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [snapshot.id, search])
+
+  return (
+    <div className="card">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <button onClick={onBack} className="text-sm text-blue-600 hover:underline">
+            ← Back to history
+          </button>
+          <h3 className="font-semibold text-gray-900 mt-1">
+            Snapshot dated {snapshot.snapshot_date}
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {snapshot.row_count.toLocaleString()} rows
+            {snapshot.asins.length > 0 && <> · {snapshot.asins.join(', ')}</>}
+            {snapshot.original_filename && <> · {snapshot.original_filename}</>}
+          </p>
+        </div>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search keywords…"
+          className="input text-sm w-56"
+        />
+      </div>
+
+      {err ? (
+        <p className="text-sm text-red-600 py-6 text-center">{err}</p>
+      ) : loading && rows === null ? (
+        <p className="text-sm text-gray-400 py-6 text-center">Loading…</p>
+      ) : (rows ?? []).length === 0 ? (
+        <p className="text-sm text-gray-400 py-6 text-center">
+          {search ? `No keyword in this snapshot matches “${search}”.`
+                  : 'This snapshot has no rows.'}
+        </p>
+      ) : (
+        <ExportableTable rows={rows!} />
+      )}
+    </div>
+  )
+}
+
 // ── History ───────────────────────────────────────────────────────────────
 
 function HistoryPanel({
   onChanged, notify,
 }: { onChanged: () => void; notify: (m: string) => void }) {
   const [rows, setRows] = useState<KiSnapshot[]>([])
+  // Which snapshot is open, if any. History used to be a receipt list: you
+  // could see that a March file had been imported and never look inside it,
+  // so importing April felt like it had replaced March.
+  const [open, setOpen] = useState<KiSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -312,6 +388,7 @@ function HistoryPanel({
   }
 
   if (loading) return <div className="card text-center py-12 text-gray-400">Loading…</div>
+  if (open) return <SnapshotDetail snapshot={open} onBack={() => setOpen(null)} />
   if (rows.length === 0) {
     return <div className="card text-center py-12 text-gray-400">No snapshots imported yet.</div>
   }
@@ -356,7 +433,15 @@ function HistoryPanel({
                   <p className="text-xs text-red-600 mt-1 max-w-[220px]">{s.error_message}</p>
                 )}
               </td>
-              <td className="px-4 py-3 text-right">
+              <td className="px-4 py-3 text-right whitespace-nowrap">
+                <button onClick={() => setOpen(s)}
+                        disabled={s.status !== 'completed'}
+                        className="text-xs px-2 py-1 mr-1 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 disabled:opacity-40"
+                        title={s.status !== 'completed'
+                          ? 'This import did not complete, so it has no rows to show'
+                          : 'Open the keywords in this snapshot'}>
+                  View data
+                </button>
                 <button onClick={() => remove(s)}
                         className="text-xs px-2 py-1 bg-white border border-red-200 text-red-500 rounded hover:bg-red-50">
                   Delete
@@ -522,7 +607,11 @@ function TrendsPanel() {
  * hidden, because an empty list with no explanation reads as a broken screen.
  */
 /**
- * The opportunities tables: paginated, selectable, exportable.
+ * A paginated, selectable, exportable table over rows of unknown shape.
+ *
+ * Used by the Opportunities sections and by Snapshot History, which is why
+ * it takes Record<string, unknown>[] and derives its columns: the two have
+ * different shapes and both want the same copy/export behaviour.
  *
  * Previously these rendered `rows.slice(0, 25)` while the header displayed
  * `rows.length`, so a section announced "50 found" and showed 25 with no way
@@ -530,7 +619,7 @@ function TrendsPanel() {
  * makes the whole screen read-only in the least useful sense — a PPC manager
  * wants these keywords in a bulk upload sheet, not on screen.
  */
-function OpportunityTable({ rows }: { rows: Record<string, unknown>[] }) {
+function ExportableTable({ rows }: { rows: Record<string, unknown>[] }) {
   const columns = useMemo(
     () => Object.keys(rows[0] ?? {}).filter(k => k !== 'keyword_id'),
     [rows],
@@ -741,7 +830,8 @@ function OpportunitiesPanel() {
       {!data.trends_available && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
           <span className="font-medium">
-            Trend-based opportunities need {needed} snapshots per ASIN.
+            Trend-based opportunities need {needed} snapshots of the same ASIN,
+            taken on {needed} different dates.
           </span>{' '}
           {counts.length === 0
             ? 'Nothing has been imported yet'
@@ -750,6 +840,14 @@ function OpportunitiesPanel() {
           useful straight away.
         </div>
       )}
+
+      <p className="text-xs text-gray-500">
+        These use the <strong>newest value you have imported</strong> for each
+        keyword, not the last file you uploaded — so figures change when you import
+        a more recent snapshot, which is the point. Older snapshots are not
+        replaced: they stay in <strong>Snapshot History</strong>, where you can open
+        and export any of them, and the trend sections below compare them.
+      </p>
 
       {sections.map(sec => {
         const rows = (data[sec.key] as Record<string, unknown>[]) ?? []
@@ -793,7 +891,7 @@ function OpportunitiesPanel() {
                 Nothing matched. That is a good result for this one.
               </p>
             ) : (
-              <OpportunityTable rows={rows} />
+              <ExportableTable rows={rows} />
             )}
           </div>
         )

@@ -516,6 +516,19 @@ export const api = {
 
   kiSnapshots: () => request<import('./types').KiSnapshot[]>('/keyword-intel/snapshots'),
 
+  /** The keyword rows of ONE snapshot.
+   *
+   *  The endpoint existed from the start but nothing called it, so Snapshot
+   *  History was a receipt list — you could see that a March file had been
+   *  imported and never look at what was in it. */
+  kiSnapshotKeywords: (snapshotId: string, opts?: { limit?: number; search?: string }) => {
+    const qs = new URLSearchParams({ limit: String(opts?.limit ?? 500) })
+    if (opts?.search) qs.set('search', opts.search)
+    return request<Record<string, unknown>[]>(
+      `/keyword-intel/snapshots/${snapshotId}/keywords?${qs.toString()}`,
+    )
+  },
+
   kiDeleteSnapshot: (id: string) =>
     request<void>(`/keyword-intel/snapshots/${id}`, { method: 'DELETE' }),
 
