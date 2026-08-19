@@ -3,10 +3,13 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
+import { Check, X } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import type { AccountDetail, ConnectionTestResponse, Profile, SyncJob, SyncResult, SyncStatus } from '@/lib/types'
+import { Notice } from '@/components/ui/Notice'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DataTable, Column } from '@/components/ui/DataTable'
+import { Button } from '@/components/ui/Button'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { LoadingState } from '@/components/ui/LoadingState'
@@ -19,15 +22,15 @@ function fmt(ts: string | null | undefined): string {
 function ModeBadge({ mode }: { mode: 'mock' | 'real' | undefined }) {
   if (mode === 'real') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-        <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-ok-tint text-ok">
+        <span className="w-1.5 h-1.5 rounded-full bg-ok inline-block" />
         Real Mode
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-      <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block" />
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-warn-tint text-warn">
+      <span className="w-1.5 h-1.5 rounded-full bg-warn inline-block" />
       Mock Mode
     </span>
   )
@@ -66,18 +69,20 @@ function ConnectionTestPanel({ accountId, onClose }: { accountId: string; onClos
   return (
     <div className="card mb-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-gray-700">Connection Diagnostic</h2>
+        <h2 className="text-sm font-semibold text-ink">Connection Diagnostic</h2>
         <div className="flex items-center gap-3">
-          <button onClick={run} disabled={loading} className="text-xs text-blue-600 hover:underline disabled:opacity-40">
+          <button onClick={run} disabled={loading} className="text-xs text-accent hover:underline disabled:opacity-40">
             {loading ? 'Running…' : 'Re-run'}
           </button>
-          <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close diagnostic">
+            <X aria-hidden />
+          </Button>
         </div>
       </div>
 
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <svg className="animate-spin h-4 w-4 text-blue-500" viewBox="0 0 24 24" fill="none">
+        <div className="flex items-center gap-2 text-sm text-ink-muted">
+          <svg className="animate-spin h-4 w-4 text-accent" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
@@ -85,22 +90,22 @@ function ConnectionTestPanel({ accountId, onClose }: { accountId: string; onClos
         </div>
       )}
 
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {err && <p className="text-sm text-danger">{err}</p>}
 
       {result && !loading && (
         <>
           <div className={`rounded-lg px-4 py-3 mb-4 text-sm font-medium ${
             allPassed
-              ? 'bg-green-50 text-green-800 border border-green-200'
-              : 'bg-red-50 text-red-800 border border-red-200'
+              ? 'bg-ok-tint text-ok border border-ok/20'
+              : 'bg-danger-tint text-danger border border-danger/20'
           }`}>
             {allPassed
-              ? `✓ All checks passed — ${result.profile_count} profile${result.profile_count !== 1 ? 's' : ''} found`
-              : `✗ ${result.error ?? 'One or more checks failed'}`
+              ? `All checks passed — ${result.profile_count} profile${result.profile_count !== 1 ? 's' : ''} found`
+              : result.error ?? 'One or more checks failed'
             }
           </div>
 
-          <div className="flex items-center gap-4 mb-4 text-xs text-gray-500">
+          <div className="flex items-center gap-4 mb-4 text-xs text-ink-muted">
             <ModeBadge mode={result.mode} />
             <span>{result.profile_count} profile{result.profile_count !== 1 ? 's' : ''} visible to this token</span>
           </div>
@@ -108,16 +113,18 @@ function ConnectionTestPanel({ accountId, onClose }: { accountId: string; onClos
           <div className="space-y-2">
             {result.steps.map(step => (
               <div key={step.name} className={`flex items-start gap-3 p-3 rounded-lg border ${
-                step.passed ? 'border-green-100 bg-green-50' : 'border-red-100 bg-red-50'
+                step.passed ? 'border-ok/20 bg-ok-tint' : 'border-danger/20 bg-danger-tint'
               }`}>
-                <span className={`mt-0.5 text-base ${step.passed ? 'text-green-600' : 'text-red-500'}`}>
-                  {step.passed ? '✓' : '✗'}
+                <span className={`mt-0.5 text-base ${step.passed ? 'text-ok' : 'text-danger'}`}>
+                  {step.passed
+                    ? <Check size={14} aria-label="passed" />
+                    : <X size={14} aria-label="failed" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-xs font-semibold ${step.passed ? 'text-green-800' : 'text-red-800'}`}>
+                  <p className={`text-xs font-semibold ${step.passed ? 'text-ok' : 'text-danger'}`}>
                     {STEP_LABELS[step.name] ?? step.name}
                   </p>
-                  <p className={`text-xs mt-0.5 break-words ${step.passed ? 'text-green-700' : 'text-red-700'}`}>
+                  <p className={`text-xs mt-0.5 break-words ${step.passed ? 'text-ok' : 'text-danger'}`}>
                     {step.detail}
                   </p>
                 </div>
@@ -141,19 +148,19 @@ interface SyncResults {
 
 function SyncResultChip({ label, result }: { label: string; result: SyncResult }) {
   return (
-    <div className={`rounded-lg border px-3 py-2 ${result.partial ? 'border-yellow-300 bg-yellow-50' : 'border-gray-100 bg-gray-50'}`}>
-      <p className="text-xs font-semibold text-gray-600 mb-1">{label}</p>
-      <p className="text-xs text-gray-500">
-        <span className="text-green-700 font-medium">{result.upserted}</span> synced
+    <div className={`rounded-lg border px-3 py-2 ${result.partial ? 'border-warn/30 bg-warn-tint' : 'border-hairline bg-surface-sunken'}`}>
+      <p className="text-xs font-semibold text-ink-muted mb-1">{label}</p>
+      <p className="text-xs text-ink-muted">
+        <span className="text-ok font-medium">{result.upserted}</span> synced
         {result.soft_deleted > 0 && (
-          <span className="ml-2 text-gray-400">{result.soft_deleted} removed</span>
+          <span className="ml-2 text-ink-subtle">{result.soft_deleted} removed</span>
         )}
         {result.pages_fetched != null && result.pages_fetched > 0 && (
-          <span className="ml-2 text-gray-400">{result.pages_fetched}p / {result.rows_fetched?.toLocaleString()}r</span>
+          <span className="ml-2 text-ink-subtle">{result.pages_fetched}p / {result.rows_fetched?.toLocaleString()}r</span>
         )}
       </p>
       {result.partial && (
-        <p className="text-[10px] text-yellow-700 mt-1">⚠ Partial — set AMAZON_FULL_SYNC_MAX_PAGES=0 for full sync</p>
+        <p className="mt-1 text-2xs text-warn">Partial — set AMAZON_FULL_SYNC_MAX_PAGES=0 for a full sync</p>
       )}
     </div>
   )
@@ -355,11 +362,11 @@ export default function AccountDetailPage() {
     },
     {
       header: 'Currency',
-      cell: row => <span className="text-gray-600">{row.currency_code ?? '—'}</span>,
+      cell: row => <span className="text-ink-muted">{row.currency_code ?? '—'}</span>,
     },
     {
       header: 'Timezone',
-      cell: row => <span className="text-gray-600 text-xs">{row.timezone ?? '—'}</span>,
+      cell: row => <span className="text-ink-muted text-xs">{row.timezone ?? '—'}</span>,
     },
     {
       header: 'Status',
@@ -367,28 +374,25 @@ export default function AccountDetailPage() {
     },
     {
       header: 'Last Synced',
-      cell: row => <span className="text-gray-500 text-xs">{fmt(row.last_synced_at)}</span>,
+      cell: row => <span className="text-ink-muted text-xs">{fmt(row.last_synced_at)}</span>,
       sortValue: row => row.last_synced_at ?? '',
     },
     {
       header: 'Marketplace ID',
-      cell: row => <span className="text-gray-400 text-xs font-mono">{row.marketplace_code}</span>,
+      cell: row => <span className="text-ink-subtle text-xs font-mono">{row.marketplace_code}</span>,
     },
   ]
 
   return (
     <div>
-      <button onClick={() => router.back()} className="text-sm text-blue-600 hover:underline mb-4 inline-block">
+      <button onClick={() => router.back()} className="text-sm text-accent hover:underline mb-4 inline-block">
         ← Back to Accounts
       </button>
 
       {connectedBanner && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
-          <span className="text-green-800 text-sm font-medium">
-            ✅ Amazon Ads connected successfully! {profiles.length} profile{profiles.length !== 1 ? 's' : ''} synced.
-          </span>
-          <button onClick={() => setConnectedBanner(false)} className="text-green-600 hover:text-green-800 text-xs">✕</button>
-        </div>
+        <Notice tone="ok" className="mb-4" onDismiss={() => setConnectedBanner(false)}>
+          Amazon Ads connected. {profiles.length} profile{profiles.length !== 1 ? 's' : ''} synced.
+        </Notice>
       )}
 
       <PageHeader
@@ -396,7 +400,7 @@ export default function AccountDetailPage() {
         subtitle={`${profiles.length} profile${profiles.length !== 1 ? 's' : ''}`}
         actions={
           <div className="flex items-center gap-3">
-            {syncMsg && <span className="text-sm text-gray-600 max-w-xs">{syncMsg}</span>}
+            {syncMsg && <span className="text-sm text-ink-muted max-w-xs">{syncMsg}</span>}
             <button onClick={() => setShowTest(t => !t)} className="btn-secondary text-sm">
               {showTest ? 'Hide Diagnostic' : 'Run Connection Test'}
             </button>
@@ -411,22 +415,22 @@ export default function AccountDetailPage() {
       <div className="card mb-6">
         <div className="flex flex-wrap items-center gap-6">
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Mode</p>
+            <p className="text-xs text-ink-muted uppercase tracking-wide mb-1">Mode</p>
             <ModeBadge mode={mode} />
           </div>
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Amazon Connection</p>
+            <p className="text-xs text-ink-muted uppercase tracking-wide mb-1">Amazon Connection</p>
             <StatusBadge status={cred?.connected ? 'connected' : 'not_connected'} />
           </div>
           {cred?.token_expires_at && (
             <div title="Amazon access tokens last ~1 hour. The system auto-refreshes using the stored refresh token.">
-              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Token Expires</p>
-              <span className="text-sm text-gray-700">{fmt(cred.token_expires_at)}</span>
+              <p className="text-xs text-ink-muted uppercase tracking-wide mb-1">Token Expires</p>
+              <span className="text-sm text-ink">{fmt(cred.token_expires_at)}</span>
             </div>
           )}
           <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Last Profile Sync</p>
-            <span className="text-sm text-gray-700">{fmt(lastSyncedAt)}</span>
+            <p className="text-xs text-ink-muted uppercase tracking-wide mb-1">Last Profile Sync</p>
+            <span className="text-sm text-ink">{fmt(lastSyncedAt)}</span>
           </div>
           <button
             onClick={handleConnect}
@@ -444,7 +448,7 @@ export default function AccountDetailPage() {
 
       {/* Profiles table */}
       <div className="card mb-6">
-        <h2 className="text-sm font-semibold text-gray-700 mb-4">Profiles</h2>
+        <h2 className="text-sm font-semibold text-ink mb-4">Profiles</h2>
         <DataTable
           columns={profileColumns}
           rows={profiles}
@@ -461,43 +465,43 @@ export default function AccountDetailPage() {
       {/* Campaign Data Sync */}
       <div className="card mb-6">
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-sm font-semibold text-gray-700">Campaign Data Sync</h2>
+          <h2 className="text-sm font-semibold text-ink">Campaign Data Sync</h2>
         </div>
 
         {/* Persistent DB status — loaded on mount, survives navigation */}
         {dbStatus && (dbStatus.campaigns.count > 0 || dbStatus.targets.count > 0) ? (
-          <div className="mb-4 rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+          <div className="mb-4 rounded-lg bg-surface-sunken border border-hairline px-4 py-3">
+            <div className="flex flex-wrap items-center gap-4 text-xs text-ink-muted">
               <span>
-                <span className="font-semibold text-gray-800">{dbStatus.campaigns.count.toLocaleString()}</span> campaigns
+                <span className="font-semibold text-ink">{dbStatus.campaigns.count.toLocaleString()}</span> campaigns
               </span>
-              <span className="text-gray-300">·</span>
+              <span className="text-ink-faint">·</span>
               <span>
-                <span className="font-semibold text-gray-800">{dbStatus.ad_groups.count.toLocaleString()}</span> ad groups
+                <span className="font-semibold text-ink">{dbStatus.ad_groups.count.toLocaleString()}</span> ad groups
               </span>
-              <span className="text-gray-300">·</span>
+              <span className="text-ink-faint">·</span>
               <span>
-                <span className="font-semibold text-gray-800">{dbStatus.targets.count.toLocaleString()}</span> targets in database
+                <span className="font-semibold text-ink">{dbStatus.targets.count.toLocaleString()}</span> targets in database
               </span>
               {dbStatus.campaigns.last_synced_at && (
                 <>
-                  <span className="text-gray-300">·</span>
-                  <span className="text-gray-400">Last synced: {fmt(dbStatus.campaigns.last_synced_at)}</span>
+                  <span className="text-ink-faint">·</span>
+                  <span className="text-ink-subtle">Last synced: {fmt(dbStatus.campaigns.last_synced_at)}</span>
                 </>
               )}
             </div>
           </div>
         ) : (
-          <p className="text-xs text-gray-400 mb-4">
+          <p className="text-xs text-ink-subtle mb-4">
             Pulls all campaigns, ad groups, and keywords from Amazon Ads into the database.
           </p>
         )}
 
         {/* Progress banner */}
         {isSyncing && (
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center gap-2 text-sm text-blue-800">
-              <svg className="animate-spin h-4 w-4 text-blue-500 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+          <div className="mb-4 p-3 bg-accent-weak border border-accent-edge rounded-lg">
+            <div className="flex items-center gap-2 text-sm text-accent">
+              <svg className="animate-spin h-4 w-4 text-accent flex-shrink-0" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
               </svg>
@@ -509,7 +513,7 @@ export default function AccountDetailPage() {
                 measured at 23–40 minutes per report on a real account. Anyone
                 watching an honest hour-long sync against a 4-minute estimate
                 reasonably concludes it has hung. */}
-            <p className="text-xs text-blue-600 mt-1 ml-6">
+            <p className="text-xs text-accent mt-1 ml-6">
               Campaigns, ad groups and keywords land within a few minutes; the counts
               above update as they arrive. Performance history is much slower — Amazon
               builds each report on its own schedule, around 20–40 minutes each, so a
@@ -521,13 +525,13 @@ export default function AccountDetailPage() {
         )}
 
         {syncError && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <Notice tone="danger">
             {syncError}
-          </div>
+          </Notice>
         )}
 
         <div className="mb-3 flex items-center gap-2 text-sm">
-          <span className="text-gray-500">Performance history:</span>
+          <span className="text-ink-muted">Performance history:</span>
           {([
             { label: 'Routine', value: undefined, hint: 'Last 3 days — fast, keeps recent numbers fresh' },
             { label: '7 days',  value: 7,  hint: 'About 15 minutes' },
@@ -542,15 +546,15 @@ export default function AccountDetailPage() {
               disabled={isSyncing}
               className={`px-2.5 py-1 rounded border text-xs transition-colors disabled:opacity-50 ${
                 syncDays === opt.value
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                  ? 'bg-accent text-white border-accent'
+                  : 'bg-surface text-ink-muted border-line hover:bg-surface-sunken'
               }`}
             >
               {opt.label}
             </button>
           ))}
           {syncDays === 90 && (
-            <span className="text-xs text-amber-600">
+            <span className="text-xs text-warn">
               90 days is ~18 Amazon reports and can take several hours.
             </span>
           )}
@@ -559,7 +563,7 @@ export default function AccountDetailPage() {
         <button
           onClick={handleSyncAll}
           disabled={isSyncing}
-          className="w-full px-4 py-3 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full px-4 py-3 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isSyncing ? (
             <span className="flex items-center justify-center gap-2">
@@ -589,30 +593,30 @@ export default function AccountDetailPage() {
       </div>
 
       {/* Danger zone */}
-      <div className="card border border-red-200">
-        <h2 className="text-sm font-semibold text-red-700 mb-3">Danger Zone</h2>
+      <div className="card border border-danger/20">
+        <h2 className="text-sm font-semibold text-danger mb-3">Danger Zone</h2>
         {!confirmDelete ? (
           <button
             onClick={() => setConfirmDelete(true)}
-            className="px-4 py-2 bg-white border border-red-300 text-red-600 text-sm rounded hover:bg-red-50"
+            className="px-4 py-2 bg-surface border border-danger/30 text-danger text-sm rounded hover:bg-danger-tint"
           >
             Delete Account
           </button>
         ) : (
           <div className="flex items-center gap-3">
-            <span className="text-sm text-red-700">
+            <span className="text-sm text-danger">
               Delete <strong>{account.name}</strong> and all its profiles/credentials? This cannot be undone.
             </span>
             <button
               onClick={handleDelete}
               disabled={deleting}
-              className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
+              className="px-4 py-2 bg-danger text-white text-sm rounded hover:bg-danger-hover disabled:opacity-50"
             >
               {deleting ? 'Deleting…' : 'Yes, Delete'}
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
-              className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700"
+              className="px-3 py-2 text-sm text-ink-muted hover:text-ink"
             >
               Cancel
             </button>

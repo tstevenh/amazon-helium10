@@ -9,7 +9,7 @@ import { cn } from '@/lib/cn'
  * One button vocabulary for the whole app.
  *
  * The old build had .btn-primary, .btn-secondary, and a dozen hand-rolled
- * `className="text-xs px-2 py-1 bg-white border..."` buttons that each drifted a
+ * `className="text-xs px-2 py-1 bg-surface border..."` buttons that each drifted a
  * pixel or a shade. Inconsistent affordances are the product register's clearest
  * tell: if Save looks different on two screens, one of them is wrong.
  *

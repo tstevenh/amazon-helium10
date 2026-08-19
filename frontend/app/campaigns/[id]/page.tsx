@@ -14,8 +14,8 @@ import { LoadingState } from '@/components/ui/LoadingState'
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="py-3 flex">
-      <dt className="w-40 text-sm font-medium text-gray-500 shrink-0">{label}</dt>
-      <dd className="text-sm text-gray-900">{value}</dd>
+      <dt className="w-40 text-sm font-medium text-ink-muted shrink-0">{label}</dt>
+      <dd className="text-sm text-ink">{value}</dd>
     </div>
   )
 }
@@ -69,12 +69,12 @@ function DateRangePicker({
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
+      <div className="flex rounded border border-hairline overflow-hidden text-xs">
         {presets.map(p => (
           <button
             key={p}
             onClick={() => { const d = datesForPreset(p); onChange(d.date_from, d.date_to) }}
-            className={`px-2.5 py-1.5 ${activePreset === p ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            className={`px-2.5 py-1.5 ${activePreset === p ? 'bg-accent text-white' : 'bg-surface text-ink-muted hover:bg-surface-sunken'}`}
           >
             {presetLabels[p]}
           </button>
@@ -86,16 +86,16 @@ function DateRangePicker({
           value={dateFrom}
           max={dateTo}
           onChange={e => onChange(e.target.value, dateTo)}
-          className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
+          className="border border-hairline rounded px-2 py-1 text-xs text-ink"
         />
-        <span className="text-xs text-gray-400">–</span>
+        <span className="text-xs text-ink-subtle">–</span>
         <input
           type="date"
           value={dateTo}
           min={dateFrom}
           max={isoDate(new Date())}
           onChange={e => onChange(dateFrom, e.target.value)}
-          className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
+          className="border border-hairline rounded px-2 py-1 text-xs text-ink"
         />
       </div>
     </div>
@@ -106,9 +106,9 @@ function DateRangePicker({
 
 function MetricTile({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="bg-gray-50 rounded-lg p-3 text-center">
-      <p className="text-[11px] text-gray-500 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className={`text-sm font-semibold ${highlight ? 'text-blue-700' : 'text-gray-900'}`}>{value}</p>
+    <div className="bg-surface-sunken rounded-lg p-3 text-center">
+      <p className="text-[11px] text-ink-muted uppercase tracking-wide mb-0.5">{label}</p>
+      <p className={`text-sm font-semibold ${highlight ? 'text-accent' : 'text-ink'}`}>{value}</p>
     </div>
   )
 }
@@ -180,7 +180,7 @@ export default function CampaignDetailPage() {
   const agColumns: Column<AdGroupWithMetrics>[] = [
     {
       header: 'Ad Group',
-      cell: row => <span className="font-medium text-gray-900">{row.name}</span>,
+      cell: row => <span className="font-medium text-ink">{row.name}</span>,
       sortValue: row => row.name,
     },
     {
@@ -191,7 +191,7 @@ export default function CampaignDetailPage() {
     {
       header: 'Spend',
       cell: row => (
-        <span className={`text-sm ${row.spend != null ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
+        <span className={`text-sm ${row.spend != null ? 'text-ink font-medium' : 'text-ink-subtle'}`}>
           {fmt.currency(row.spend)}
         </span>
       ),
@@ -200,7 +200,7 @@ export default function CampaignDetailPage() {
     {
       header: 'Sales',
       cell: row => (
-        <span className={`text-sm ${row.sales != null ? 'text-gray-900' : 'text-gray-400'}`}>
+        <span className={`text-sm ${row.sales != null ? 'text-ink' : 'text-ink-subtle'}`}>
           {fmt.currency(row.sales)}
         </span>
       ),
@@ -210,7 +210,7 @@ export default function CampaignDetailPage() {
       header: 'ACOS',
       cell: row => {
         const v = row.acos != null ? Number(row.acos) : null
-        const color = v == null ? 'text-gray-400' : v > 40 ? 'text-red-600' : v > 25 ? 'text-yellow-700' : 'text-green-600'
+        const color = v == null ? 'text-ink-subtle' : v > 40 ? 'text-danger' : v > 25 ? 'text-warn' : 'text-ok'
         return <span className={`text-sm font-medium ${color}`}>{fmt.acos(row.acos)}</span>
       },
       sortValue: row => row.acos ?? 9999,
@@ -218,7 +218,7 @@ export default function CampaignDetailPage() {
     {
       header: 'ROAS',
       cell: row => (
-        <span className={`text-sm ${row.roas != null ? 'text-gray-900' : 'text-gray-400'}`}>
+        <span className={`text-sm ${row.roas != null ? 'text-ink' : 'text-ink-subtle'}`}>
           {fmt.roas(row.roas)}
         </span>
       ),
@@ -226,13 +226,13 @@ export default function CampaignDetailPage() {
     },
     {
       header: 'Clicks',
-      cell: row => <span className="text-sm text-gray-700">{fmt.int(row.clicks)}</span>,
+      cell: row => <span className="text-sm text-ink">{fmt.int(row.clicks)}</span>,
       sortValue: row => row.clicks ?? -1,
     },
     {
       header: 'Default Bid',
       cell: row => (
-        <span className="text-gray-600 text-sm">
+        <span className="text-ink-muted text-sm">
           {row.default_bid != null ? `$${Number(row.default_bid).toFixed(2)}` : '—'}
         </span>
       ),
@@ -244,7 +244,7 @@ export default function CampaignDetailPage() {
     <div>
       <button
         onClick={() => router.back()}
-        className="text-sm text-blue-600 hover:underline mb-4 inline-block"
+        className="text-sm text-accent hover:underline mb-4 inline-block"
       >
         ← Back to Campaigns
       </button>
@@ -257,13 +257,13 @@ export default function CampaignDetailPage() {
       {/* Campaign-level performance card — shares date range with ad groups table */}
       <div className="card mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-          <h2 className="text-sm font-semibold text-gray-700">Performance</h2>
+          <h2 className="text-sm font-semibold text-ink">Performance</h2>
           <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onChange={handleDateChange} />
         </div>
         {dataLoading ? (
-          <p className="text-xs text-gray-400 py-4 text-center">Loading metrics…</p>
+          <p className="text-xs text-ink-subtle py-4 text-center">Loading metrics…</p>
         ) : perfNoData ? (
-          <p className="text-xs text-gray-400 py-4 text-center">
+          <p className="text-xs text-ink-subtle py-4 text-center">
             No performance data for this range. Run Sync All from Campaign Manager first.
           </p>
         ) : perfSummary ? (
@@ -281,8 +281,8 @@ export default function CampaignDetailPage() {
       </div>
 
       <div className="card mb-6">
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">Campaign Details</h2>
-        <dl className="divide-y divide-gray-100">
+        <h2 className="text-sm font-semibold text-ink mb-2">Campaign Details</h2>
+        <dl className="divide-y divide-hairline">
           <DetailRow label="Type"    value={campaign.ad_product} />
           <DetailRow label="Status"  value={<StatusBadge status={campaign.status} />} />
           <DetailRow label="Targeting" value={campaign.targeting_type ?? '—'} />
@@ -298,7 +298,7 @@ export default function CampaignDetailPage() {
       {/* Ad groups table — metrics match the same date range as the perf card above */}
       <div className="card">
         <div className="flex items-center justify-between mb-4 gap-3">
-          <h2 className="text-sm font-semibold text-gray-700 shrink-0">
+          <h2 className="text-sm font-semibold text-ink shrink-0">
             Ad Groups ({filteredAdGroups.length}{search ? ` of ${adGroups.length}` : ''})
           </h2>
           <SearchBox

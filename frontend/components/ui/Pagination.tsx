@@ -11,8 +11,8 @@ export function Pagination({ page, pageSize, total, onChange }: PaginationProps)
   const end = Math.min(page * pageSize, total)
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 sm:px-6">
-      <p className="text-sm text-gray-600">
+    <div className="flex items-center justify-between px-4 py-3 border-t border-hairline sm:px-6">
+      <p className="text-sm text-ink-muted">
         Showing <span className="font-medium">{start}</span>–<span className="font-medium">{end}</span>{' '}
         of <span className="font-medium">{total}</span>
       </p>
@@ -41,7 +41,7 @@ export function Pagination({ page, pageSize, total, onChange }: PaginationProps)
               onClick={() => onChange(p)}
               className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
                 p === page
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-accent text-white'
                   : 'btn-secondary'
               }`}
             >

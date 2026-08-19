@@ -28,12 +28,12 @@ export function metricColumns<T extends PerfMetrics>(): Column<T>[] {
   return [
     {
       header: 'Spend',
-      cell: row => <span className={`text-sm ${row.spend != null ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>{fmt.currency(row.spend)}</span>,
+      cell: row => <span className={`text-sm ${row.spend != null ? 'text-ink font-medium' : 'text-ink-subtle'}`}>{fmt.currency(row.spend)}</span>,
       sortValue: row => row.spend ?? -1,
     },
     {
       header: 'Sales',
-      cell: row => <span className={`text-sm ${row.sales != null ? 'text-gray-900' : 'text-gray-400'}`}>{fmt.currency(row.sales)}</span>,
+      cell: row => <span className={`text-sm ${row.sales != null ? 'text-ink' : 'text-ink-subtle'}`}>{fmt.currency(row.sales)}</span>,
       sortValue: row => row.sales ?? -1,
     },
     {
@@ -42,39 +42,39 @@ export function metricColumns<T extends PerfMetrics>(): Column<T>[] {
         const v = row.acos != null ? Number(row.acos) : null
         // Thresholds match the Campaigns page so the same colour means the
         // same thing on every screen.
-        const color = v == null ? 'text-gray-400' : v > 40 ? 'text-red-600' : v > 25 ? 'text-yellow-700' : 'text-green-600'
+        const color = v == null ? 'text-ink-subtle' : v > 40 ? 'text-danger' : v > 25 ? 'text-warn' : 'text-ok'
         return <span className={`text-sm font-medium ${color}`}>{fmt.acos(row.acos)}</span>
       },
       sortValue: row => row.acos ?? 9999,
     },
     {
       header: 'ROAS',
-      cell: row => <span className={`text-sm ${row.roas != null ? 'text-gray-900' : 'text-gray-400'}`}>{fmt.roas(row.roas)}</span>,
+      cell: row => <span className={`text-sm ${row.roas != null ? 'text-ink' : 'text-ink-subtle'}`}>{fmt.roas(row.roas)}</span>,
       sortValue: row => row.roas ?? -1,
     },
     {
       header: 'Orders',
-      cell: row => <span className="text-sm text-gray-700">{fmt.int(row.orders)}</span>,
+      cell: row => <span className="text-sm text-ink">{fmt.int(row.orders)}</span>,
       sortValue: row => row.orders ?? -1,
     },
     {
       header: 'Clicks',
-      cell: row => <span className="text-sm text-gray-700">{fmt.int(row.clicks)}</span>,
+      cell: row => <span className="text-sm text-ink">{fmt.int(row.clicks)}</span>,
       sortValue: row => row.clicks ?? -1,
     },
     {
       header: 'Impr.',
-      cell: row => <span className="text-sm text-gray-500">{fmt.int(row.impressions)}</span>,
+      cell: row => <span className="text-sm text-ink-muted">{fmt.int(row.impressions)}</span>,
       sortValue: row => row.impressions ?? -1,
     },
     {
       header: 'CPC',
-      cell: row => <span className="text-sm text-gray-600">{fmt.currency(row.cpc)}</span>,
+      cell: row => <span className="text-sm text-ink-muted">{fmt.currency(row.cpc)}</span>,
       sortValue: row => row.cpc ?? -1,
     },
     {
       header: 'CTR',
-      cell: row => <span className="text-sm text-gray-500">{fmt.pct(row.ctr)}</span>,
+      cell: row => <span className="text-sm text-ink-muted">{fmt.pct(row.ctr)}</span>,
       sortValue: row => row.ctr ?? -1,
     },
   ]

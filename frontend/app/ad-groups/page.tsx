@@ -128,7 +128,7 @@ export default function AdGroupsPage() {
   const columns: Column<AdGroupWithMetrics>[] = [
     {
       header: 'Ad Group',
-      cell: row => <span className="font-medium text-gray-900">{row.name}</span>,
+      cell: row => <span className="font-medium text-ink">{row.name}</span>,
       sortValue: row => row.name,
     },
     {
@@ -138,11 +138,11 @@ export default function AdGroupsPage() {
         return c ? (
           <button
             onClick={e => { e.stopPropagation(); router.push(`/campaigns/${c.id}`) }}
-            className="text-blue-600 hover:underline text-sm text-left"
+            className="text-accent hover:underline text-sm text-left"
           >
             {c.name}
           </button>
-        ) : <span className="text-gray-400 text-sm">—</span>
+        ) : <span className="text-ink-subtle text-sm">—</span>
       },
       sortValue: row => campaignMap[row.campaign_id]?.name ?? '',
     },
@@ -151,8 +151,8 @@ export default function AdGroupsPage() {
       cell: row => {
         const c = campaignMap[row.campaign_id]
         return c ? (
-          <span className="text-xs font-mono bg-gray-100 rounded px-2 py-0.5">{c.ad_product}</span>
-        ) : <span className="text-gray-400">—</span>
+          <span className="text-xs font-mono bg-surface-sunken rounded px-2 py-0.5">{c.ad_product}</span>
+        ) : <span className="text-ink-subtle">—</span>
       },
     },
     {
@@ -163,7 +163,7 @@ export default function AdGroupsPage() {
     {
       header: 'Default Bid',
       cell: row => (
-        <span className="text-gray-700">
+        <span className="text-ink">
           {row.default_bid != null ? `$${Number(row.default_bid).toFixed(2)}` : '—'}
         </span>
       ),

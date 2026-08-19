@@ -6,6 +6,7 @@ import { useColumnWidths } from '@/components/ui/useColumnWidths'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
+import { Notice } from '@/components/ui/Notice'
 import { SearchTermRow, Campaign, AdGroup } from '@/lib/types'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -231,8 +232,8 @@ export default function SearchTermsPage() {
   }
 
   function SortIndicator({ k }: { k: SortKey }) {
-    if (sortKey !== k) return <span className="text-gray-300 ml-1">↕</span>
-    return <span className="text-blue-500 ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
+    if (sortKey !== k) return <span className="text-ink-faint ml-1">↕</span>
+    return <span className="text-accent ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
   }
 
   const noContext = !accountsLoading && !currentAccountId
@@ -243,9 +244,9 @@ export default function SearchTermsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Search Terms</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Search Terms</h1>
           {!loading && rows.length > 0 && (
-            <p className="text-sm text-gray-500 mt-0.5">{rows.length} terms found</p>
+            <p className="text-sm text-ink-muted mt-0.5">{rows.length} terms found</p>
           )}
         </div>
         <button
@@ -258,24 +259,24 @@ export default function SearchTermsPage() {
       </div>
 
       {syncMsg && (
-        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">
+        <Notice tone="ok">
           {syncMsg}
-        </div>
+        </Notice>
       )}
 
       {/* Filters */}
       <div className="card space-y-3">
         {/* Date presets */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium text-gray-500">Date range:</span>
+          <span className="text-xs font-medium text-ink-muted">Date range:</span>
           {DATE_PRESETS.map(p => (
             <button
               key={p.label}
               onClick={() => applyPreset(p)}
               className={`text-xs px-3 py-1 rounded-full border transition-colors ${
                 activePreset === p.label
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+                  ? 'bg-accent text-white border-accent'
+                  : 'bg-surface text-ink-muted border-line hover:border-accent'
               }`}
             >
               {p.label}
@@ -284,7 +285,7 @@ export default function SearchTermsPage() {
           <div className="flex items-center gap-1 ml-2">
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
               className="input text-xs py-1 px-2 w-36" />
-            <span className="text-gray-400 text-xs">to</span>
+            <span className="text-ink-subtle text-xs">to</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               className="input text-xs py-1 px-2 w-36" />
           </div>
@@ -343,17 +344,17 @@ export default function SearchTermsPage() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+        <Notice tone="danger">
           {error}
-        </div>
+        </Notice>
       )}
 
       {/* Empty / no-context states */}
       {noContext && (
-        <div className="card text-center py-12 text-gray-500">Select an account to view search terms.</div>
+        <div className="card text-center py-12 text-ink-muted">Select an account to view search terms.</div>
       )}
       {noProfiles && (
-        <div className="card text-center py-12 text-gray-500">
+        <div className="card text-center py-12 text-ink-muted">
           No profiles synced for this account. Go to Settings → Accounts and sync profiles, then sync search terms.
         </div>
       )}
@@ -364,7 +365,7 @@ export default function SearchTermsPage() {
           <table className="w-full text-sm" style={cols.tableStyle}>
             {cols.colGroup}
             <thead ref={cols.theadRef}>
-              <tr className="border-b border-gray-200 bg-gray-50">
+              <tr className="border-b border-hairline bg-surface-sunken">
                 {[
                   { label: 'Search Term',  key: 'search_term' as SortKey, cls: 'text-left w-56' },
                   { label: 'Campaign',     key: '' as SortKey,            cls: 'text-left w-40' },
@@ -380,7 +381,7 @@ export default function SearchTermsPage() {
                   { label: 'CVR',          key: 'conversion_rate' as SortKey, cls: 'text-right' },
                 ].map((col, i, arr) => (
                   <th key={col.label}
-                    className={`relative px-3 py-2.5 text-xs font-semibold text-gray-600 whitespace-nowrap ${col.cls} ${col.key ? 'cursor-pointer hover:bg-gray-100' : ''}`}
+                    className={`relative px-3 py-2.5 text-xs font-semibold text-ink-muted whitespace-nowrap ${col.cls} ${col.key ? 'cursor-pointer hover:bg-surface-sunken' : ''}`}
                     onClick={() => col.key && handleSort(col.key)}
                   >
                     {col.label}{col.key && <SortIndicator k={col.key} />}
@@ -389,41 +390,41 @@ export default function SearchTermsPage() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-hairline">
               {loading ? (
-                <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={12} className="px-4 py-12 text-center text-ink-subtle">Loading…</td></tr>
               ) : pageRows.length === 0 ? (
-                <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">
+                <tr><td colSpan={12} className="px-4 py-12 text-center text-ink-subtle">
                   No search terms found. Run Sync Search Terms to import data.
                 </td></tr>
               ) : pageRows.map((row, i) => {
                 const acosVal = row.acos ? parseFloat(row.acos) : null
                 const acosColor = acosVal == null ? '' :
-                  acosVal < 0.25 ? 'text-green-600' :
-                  acosVal < 0.50 ? 'text-yellow-600' : 'text-red-600'
+                  acosVal < 0.25 ? 'text-ok' :
+                  acosVal < 0.50 ? 'text-warn' : 'text-danger'
                 return (
-                  <tr key={`${row.search_term}-${i}`} className="hover:bg-gray-50">
-                    <td className="px-3 py-2.5 font-medium text-gray-900 max-w-[224px] truncate" title={row.search_term}>
+                  <tr key={`${row.search_term}-${i}`} className="hover:bg-surface-sunken">
+                    <td className="px-3 py-2.5 font-medium text-ink max-w-[224px] truncate" title={row.search_term}>
                       {row.search_term}
                     </td>
-                    <td className="px-3 py-2.5 text-gray-500 max-w-[160px] truncate" title={row.campaign_name ?? ''}>
+                    <td className="px-3 py-2.5 text-ink-muted max-w-[160px] truncate" title={row.campaign_name ?? ''}>
                       {row.campaign_name ?? '—'}
                     </td>
                     {/* Rows were already grouped per ad group, but only the
                         campaign was shown — so the same search term in two ad
                         groups looked like a duplicated row. */}
-                    <td className="px-3 py-2.5 text-gray-500 max-w-[160px] truncate" title={row.ad_group_name ?? ''}>
+                    <td className="px-3 py-2.5 text-ink-muted max-w-[160px] truncate" title={row.ad_group_name ?? ''}>
                       {row.ad_group_name ?? '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{row.impressions.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{row.clicks.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{fmtCurrency(row.cost)}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{fmtCurrency(row.sales)}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{row.orders}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{row.impressions.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{row.clicks.toLocaleString()}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{fmtCurrency(row.cost)}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{fmtCurrency(row.sales)}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{row.orders}</td>
                     <td className={`px-3 py-2.5 text-right font-medium ${acosColor}`}>{fmtPct(row.acos)}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{row.roas ? fmt(row.roas) + 'x' : '—'}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{fmtPct(row.ctr)}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{fmtPct(row.conversion_rate)}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{row.roas ? fmt(row.roas) + 'x' : '—'}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{fmtPct(row.ctr)}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{fmtPct(row.conversion_rate)}</td>
                   </tr>
                 )
               })}
@@ -432,7 +433,7 @@ export default function SearchTermsPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between text-sm text-gray-600">
+            <div className="px-4 py-3 border-t border-hairline flex items-center justify-between text-sm text-ink-muted">
               <span>{sorted.length} terms · page {page} of {totalPages}</span>
               <div className="flex gap-2">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}

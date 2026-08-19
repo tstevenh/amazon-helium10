@@ -13,9 +13,9 @@ export function Nav() {
   const { user, logout } = useAuth()
 
   return (
-    <nav className="bg-gray-900 text-white">
+    <nav className="bg-ink text-white">
       <div className="max-w-7xl mx-auto px-4 flex items-center h-14 gap-8">
-        <span className="font-bold text-sm tracking-wide text-blue-400 shrink-0">
+        <span className="font-bold text-sm tracking-wide text-accent shrink-0">
           PPC OS
         </span>
         <div className="flex items-center gap-1 flex-1">
@@ -25,8 +25,8 @@ export function Nav() {
               href={l.href}
               className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                 pathname.startsWith(l.href)
-                  ? 'bg-gray-700 text-white'
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  ? 'bg-ink-muted text-white'
+                  : 'text-ink-faint hover:bg-ink hover:text-white'
               }`}
             >
               {l.label}
@@ -35,10 +35,10 @@ export function Nav() {
         </div>
         {user && (
           <div className="flex items-center gap-3 text-sm">
-            <span className="text-gray-400">{user.email}</span>
+            <span className="text-ink-subtle">{user.email}</span>
             <button
               onClick={logout}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="text-ink-subtle hover:text-white transition-colors"
             >
               Sign out
             </button>

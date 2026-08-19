@@ -16,7 +16,15 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
+import {
+  Copy, History, Info, PauseCircle, Pencil, Play, PlayCircle, Trash2, X,
+} from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
+import { Notice } from '@/components/ui/Notice'
+import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
+import { StatBar } from '@/components/ui/StatBar'
+import { MenuItem, MenuSeparator, RowMenu } from '@/components/ui/Menu'
 import type {
   Rule, RuleExecution, ExecuteRuleResponse, RuleConfiguration, RuleCondition,
   Profile, RuleTemplate, AdGroup, Campaign } from '@/lib/types'
@@ -32,17 +40,17 @@ const RULE_TYPE_LABELS: Record<string, string> = {
 }
 
 const RULE_TYPE_COLORS: Record<string, string> = {
-  negative: 'bg-red-100 text-red-700',
-  harvest:  'bg-green-100 text-green-700',
-  bid:      'bg-purple-100 text-purple-700',
-  budget:   'bg-blue-100 text-blue-700',
-  placement: 'bg-teal-100 text-teal-700',
+  negative: 'bg-danger-tint text-danger',
+  harvest:  'bg-ok-tint text-ok',
+  bid:      'bg-accent-weak text-accent',
+  budget:   'bg-info-tint text-accent',
+  placement: 'bg-ok-tint text-ok',
 }
 
 const EXEC_STATUS_COLORS: Record<string, string> = {
-  completed: 'bg-green-100 text-green-700',
-  running:   'bg-yellow-100 text-yellow-700',
-  failed:    'bg-red-100 text-red-700',
+  completed: 'bg-ok-tint text-ok',
+  running:   'bg-warn-tint text-warn',
+  failed:    'bg-danger-tint text-danger',
 }
 
 const FIELD_OPTIONS = [
@@ -155,48 +163,48 @@ function ExecHistoryDrawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-white shadow-xl flex flex-col overflow-y-auto">
+      <div className="relative w-full max-w-lg bg-surface shadow-xl flex flex-col overflow-y-auto">
         {/* Header */}
-        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+        <div className="flex items-start justify-between px-5 py-4 border-b border-hairline sticky top-0 bg-surface z-10">
           <div>
-            <p className="text-xs text-gray-400 mb-1">Execution History</p>
-            <h2 className="text-base font-semibold text-gray-900 truncate max-w-xs">{rule.name}</h2>
+            <p className="text-xs text-ink-subtle mb-1">Execution History</p>
+            <h2 className="text-base font-semibold text-ink truncate max-w-xs">{rule.name}</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none mt-0.5">×</button>
+          <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted text-xl leading-none mt-0.5">×</button>
         </div>
 
         {/* Executions list */}
-        <div className="flex-1 divide-y divide-gray-100">
+        <div className="flex-1 divide-y divide-hairline">
           {executions.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-gray-400">
+            <div className="px-5 py-10 text-center text-sm text-ink-subtle">
               No executions yet. Click "Run" to execute this rule.
             </div>
           ) : executions.map(ex => (
             <div key={ex.id} className="px-5 py-4">
               <div className="flex items-center justify-between mb-2">
-                <span className={`text-xs px-2 py-0.5 rounded font-medium ${EXEC_STATUS_COLORS[ex.execution_status] ?? 'bg-gray-100 text-gray-600'}`}>
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${EXEC_STATUS_COLORS[ex.execution_status] ?? 'bg-surface-sunken text-ink-muted'}`}>
                   {ex.execution_status}
                 </span>
-                <span className="text-xs text-gray-400">{fmtDateTime(ex.started_at)}</span>
+                <span className="text-xs text-ink-subtle">{fmtDateTime(ex.started_at)}</span>
               </div>
               <div className="grid grid-cols-3 gap-2 text-sm">
-                <div className="bg-gray-50 rounded p-2.5 text-center">
-                  <p className="text-xs text-gray-400">Rows Evaluated</p>
-                  <p className="text-base font-semibold text-gray-800 mt-0.5">{ex.rows_evaluated}</p>
+                <div className="bg-surface-sunken rounded p-2.5 text-center">
+                  <p className="text-xs text-ink-subtle">Rows Evaluated</p>
+                  <p className="text-base font-semibold text-ink mt-0.5">{ex.rows_evaluated}</p>
                 </div>
-                <div className="bg-green-50 rounded p-2.5 text-center">
-                  <p className="text-xs text-gray-400">Suggestions Created</p>
-                  <p className="text-base font-semibold text-green-700 mt-0.5">{ex.suggestions_generated}</p>
+                <div className="bg-ok-tint rounded p-2.5 text-center">
+                  <p className="text-xs text-ink-subtle">Suggestions Created</p>
+                  <p className="text-base font-semibold text-ok mt-0.5">{ex.suggestions_generated}</p>
                 </div>
-                <div className="bg-gray-50 rounded p-2.5 text-center">
-                  <p className="text-xs text-gray-400">Duration</p>
-                  <p className="text-base font-semibold text-gray-800 mt-0.5">
+                <div className="bg-surface-sunken rounded p-2.5 text-center">
+                  <p className="text-xs text-ink-subtle">Duration</p>
+                  <p className="text-base font-semibold text-ink mt-0.5">
                     {fmtDuration(ex.started_at, ex.completed_at)}
                   </p>
                 </div>
               </div>
               {ex.error_message && (
-                <div className="mt-2 text-xs text-red-600 bg-red-50 rounded p-2">
+                <div className="mt-2 text-xs text-danger bg-danger-tint rounded p-2">
                   {ex.error_message}
                 </div>
               )}
@@ -252,7 +260,7 @@ function ConditionRow({
       {/* Value */}
       <div className="relative flex-shrink-0">
         {fieldMeta?.unit === '$' && (
-          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-subtle text-sm">$</span>
         )}
         <input
           type="number"
@@ -263,7 +271,7 @@ function ConditionRow({
           className={`input text-sm py-1.5 w-24 ${fieldMeta?.unit === '$' ? 'pl-6' : ''}`}
         />
         {fieldMeta?.unit && fieldMeta.unit !== '$' && (
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-subtle text-xs">
             {fieldMeta.unit}
           </span>
         )}
@@ -274,7 +282,7 @@ function ConditionRow({
         <button
           type="button"
           onClick={() => onRemove(idx)}
-          className="text-gray-400 hover:text-red-500 transition-colors text-lg leading-none"
+          className="text-ink-subtle hover:text-danger transition-colors text-lg leading-none"
           title="Remove condition"
         >
           ×
@@ -366,14 +374,14 @@ function ScopePicker({
       ].filter(Boolean).join(' · ')
 
   return (
-    <div className="rounded-lg border border-gray-200 p-3">
+    <div className="rounded-lg border border-hairline p-3">
       <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
         <div>
-          <p className="text-sm font-medium text-gray-800">Apply this rule to</p>
-          <p className="text-xs text-gray-500">{scopeSummary}</p>
+          <p className="text-sm font-medium text-ink">Apply this rule to</p>
+          <p className="text-xs text-ink-muted">{scopeSummary}</p>
         </div>
         {(campaignIds.length > 0 || adGroupIds.length > 0) && (
-          <button type="button" className="text-xs text-blue-600 hover:underline"
+          <button type="button" className="text-xs text-accent hover:underline"
                   onClick={() => onChange({ campaign_ids: [], ad_group_ids: [] })}>
             Clear — run on everything
           </button>
@@ -383,14 +391,14 @@ function ScopePicker({
       <div className="flex items-center gap-1 mb-2 text-xs">
         <button type="button" onClick={() => setTab('campaigns')}
                 className={`px-2 py-1 rounded ${tab === 'campaigns'
-                  ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300'}`}>
+                  ? 'bg-accent text-white' : 'bg-surface border border-line'}`}>
           Campaigns{campaignIds.length ? ` (${campaignIds.length})` : ''}
         </button>
         <button type="button" onClick={() => setTab('adgroups')} disabled={!allowAdGroups}
                 title={allowAdGroups ? undefined
                   : 'Budget and placement live on the campaign in Amazon, not the ad group'}
                 className={`px-2 py-1 rounded disabled:opacity-40 ${tab === 'adgroups'
-                  ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300'}`}>
+                  ? 'bg-accent text-white' : 'bg-surface border border-line'}`}>
           Ad Groups{adGroupIds.length ? ` (${adGroupIds.length})` : ''}
         </button>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…"
@@ -398,40 +406,40 @@ function ScopePicker({
       </div>
 
       {!allowAdGroups && (
-        <p className="text-xs text-gray-500 mb-2">
+        <p className="text-xs text-ink-muted mb-2">
           Amazon holds the budget and the placement adjustments on the campaign,
           so this rule type can only be scoped by campaign.
         </p>
       )}
 
-      <div className="max-h-52 overflow-y-auto border border-gray-100 rounded">
+      <div className="max-h-52 overflow-y-auto border border-hairline rounded">
         {tab === 'campaigns' ? (
           visibleCampaigns.length === 0 ? (
             // "No campaigns match" was shown before a marketplace was chosen,
             // which blames the search box for a different problem.
-            <p className="text-xs text-gray-400 p-3">
+            <p className="text-xs text-ink-subtle p-3">
               {campaigns.length === 0
                 ? 'Choose a marketplace for this rule first — campaigns belong to one marketplace.'
                 : 'No campaigns match that search.'}
             </p>
           ) : visibleCampaigns.map(c => (
             <label key={c.id}
-                   className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-gray-50 cursor-pointer">
+                   className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-surface-sunken cursor-pointer">
               <input type="checkbox" checked={campSet.has(c.id)}
                      onChange={() => toggleCampaign(c.id)} />
               <span className="truncate" title={c.name}>{c.name}</span>
-              <span className="ml-auto text-gray-400 shrink-0">{c.status}</span>
+              <span className="ml-auto text-ink-subtle shrink-0">{c.status}</span>
             </label>
           ))
         ) : selectableAdGroups.length === 0 ? (
-          <p className="text-xs text-gray-400 p-3">
+          <p className="text-xs text-ink-subtle p-3">
             {campaignIds.length === 0
               ? 'Pick a campaign first, or search to narrow this list.'
               : 'No ad groups in the selected campaigns match.'}
           </p>
         ) : selectableAdGroups.map(g => (
           <label key={g.id}
-                 className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-gray-50 cursor-pointer">
+                 className="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-surface-sunken cursor-pointer">
             <input type="checkbox" checked={agSet.has(g.id)}
                    onChange={() => toggleAdGroup(g.id)} />
             <span className="truncate" title={g.name}>{g.name}</span>
@@ -440,7 +448,7 @@ function ScopePicker({
       </div>
 
       {adGroupIds.length > 0 && campaignIds.length === 0 && (
-        <p className="text-xs text-amber-700 mt-2">
+        <p className="text-xs text-warn mt-2">
           Ad groups are selected with no campaign chosen. Add their campaigns too —
           the API refuses an ad group outside the campaign scope, because it would
           match nothing and the rule would look broken rather than misconfigured.
@@ -581,13 +589,13 @@ function RuleModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-2xl bg-white rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-2xl bg-surface rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline">
+          <h2 className="text-lg font-semibold text-ink">
             {mode === 'create' ? 'Create Rule' : 'Edit Rule'}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted text-xl leading-none">×</button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
@@ -595,8 +603,8 @@ function RuleModal({
             {/* Marketplace — only when the header can't tell us which one */}
             {mustPickProfile && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Marketplace <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-ink mb-1">
+                  Marketplace <span className="text-danger">*</span>
                 </label>
                 <select
                   value={pickedProfile}
@@ -612,7 +620,7 @@ function RuleModal({
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-ink-subtle mt-1">
                   A rule only sees data from the marketplace it belongs to.
                 </p>
               </div>
@@ -620,7 +628,7 @@ function RuleModal({
 
             {/* Name */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-ink mb-1">Name <span className="text-danger">*</span></label>
               <input
                 type="text"
                 value={name}
@@ -633,7 +641,7 @@ function RuleModal({
 
             {/* Description */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <label className="block text-sm font-medium text-ink mb-1">Description</label>
               <textarea
                 value={description}
                 onChange={e => setDescription(e.target.value)}
@@ -646,7 +654,7 @@ function RuleModal({
             {/* Rule Type + Status row */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Rule Type</label>
+                <label className="block text-sm font-medium text-ink mb-1">Rule Type</label>
                 {/* Driven by RULE_TYPE_LABELS rather than hardcoded, so adding a
                     rule type cannot leave the picker behind again. Budget rules
                     shipped unreachable this way: the engine and the suggestion
@@ -658,7 +666,7 @@ function RuleModal({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <label className="block text-sm font-medium text-ink mb-1">Status</label>
                 <select value={status} onChange={e => setStatus(e.target.value)} className="input w-full">
                   <option value="enabled">Enabled</option>
                   <option value="disabled">Disabled</option>
@@ -682,18 +690,18 @@ function RuleModal({
             {/* Conditions */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Conditions <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-ink">
+                  Conditions <span className="text-danger">*</span>
                 </label>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500">Logic:</span>
-                  <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
+                  <span className="text-xs text-ink-muted">Logic:</span>
+                  <div className="flex rounded border border-hairline overflow-hidden text-xs">
                     {(['AND', 'OR'] as const).map(l => (
                       <button
                         key={l} type="button"
                         onClick={() => setConfig(c => ({ ...c, logic: l }))}
                         className={`px-2.5 py-1 transition-colors ${
-                          config.logic === l ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                          config.logic === l ? 'bg-accent text-white' : 'bg-surface text-ink-muted hover:bg-surface-sunken'
                         }`}
                       >
                         {l}
@@ -702,7 +710,7 @@ function RuleModal({
                   </div>
                 </div>
               </div>
-              <div className="space-y-2.5 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="space-y-2.5 p-3 bg-surface-sunken rounded-lg border border-hairline">
                 {config.conditions.map((cond, idx) => (
                   <ConditionRow
                     key={idx}
@@ -716,11 +724,11 @@ function RuleModal({
                 <button
                   type="button"
                   onClick={addCondition}
-                  className="text-sm text-blue-600 hover:underline"
+                  className="text-sm text-accent hover:underline"
                 >
                   + Add Condition
                 </button>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-ink-subtle">
                   ACOS/CTR/CVR values are percentages (enter 30 for 30%)
                 </p>
               </div>
@@ -729,7 +737,7 @@ function RuleModal({
             {/* Suggestion type + Lookback row */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Creates Suggestion Type</label>
+                <label className="block text-sm font-medium text-ink mb-1">Creates Suggestion Type</label>
                 <select
                   value={config.suggestion_type}
                   onChange={e => setConfig(c => ({ ...c, suggestion_type: e.target.value }))}
@@ -741,7 +749,7 @@ function RuleModal({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Lookback Period</label>
+                <label className="block text-sm font-medium text-ink mb-1">Lookback Period</label>
                 <select
                   value={config.lookback_days}
                   onChange={e => setConfig(c => ({ ...c, lookback_days: parseInt(e.target.value) }))}
@@ -756,8 +764,8 @@ function RuleModal({
 
             {/* Bid action — only for bid rules */}
             {ruleType === 'bid' && (
-              <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Bid Adjustment Action</label>
+              <div className="p-3 bg-purple-50 rounded-lg border border-accent-edge">
+                <label className="block text-sm font-medium text-ink mb-2">Bid Adjustment Action</label>
                 <div className="flex items-center gap-3">
                   <select
                     value={config.action?.type ?? 'decrease_bid'}
@@ -771,7 +779,7 @@ function RuleModal({
                     <option value="decrease_bid">Decrease bid</option>
                     <option value="increase_bid">Increase bid</option>
                   </select>
-                  <span className="text-sm text-gray-600">by</span>
+                  <span className="text-sm text-ink-muted">by</span>
                   <input
                     type="number"
                     min="1"
@@ -783,15 +791,15 @@ function RuleModal({
                     }))}
                     className="input text-sm py-1.5 w-20"
                   />
-                  <span className="text-sm text-gray-600">%</span>
+                  <span className="text-sm text-ink-muted">%</span>
                 </div>
               </div>
             )}
 
             {/* Budget action — only for budget rules */}
             {ruleType === 'budget' && (
-              <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Daily Budget Action</label>
+              <div className="p-3 bg-accent-weak rounded-lg border border-accent-edge">
+                <label className="block text-sm font-medium text-ink mb-2">Daily Budget Action</label>
                 <div className="flex items-center gap-3">
                   <select
                     value={config.action?.type ?? 'decrease_budget'}
@@ -805,7 +813,7 @@ function RuleModal({
                     <option value="decrease_budget">Decrease daily budget</option>
                     <option value="increase_budget">Increase daily budget</option>
                   </select>
-                  <span className="text-sm text-gray-600">by</span>
+                  <span className="text-sm text-ink-muted">by</span>
                   <input
                     type="number"
                     min="1"
@@ -817,9 +825,9 @@ function RuleModal({
                     }))}
                     className="input text-sm py-1.5 w-20"
                   />
-                  <span className="text-sm text-gray-600">%</span>
+                  <span className="text-sm text-ink-muted">%</span>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
+                <p className="text-xs text-ink-muted mt-2">
                   Budget rules read whole-campaign totals, not search terms, and skip
                   campaigns started in the last 3 days — Amazon needs about 72 hours
                   before a new campaign&apos;s numbers mean anything. Amazon&apos;s minimum
@@ -830,8 +838,8 @@ function RuleModal({
 
             {/* Placement action — only for placement rules */}
             {ruleType === 'placement' && (
-              <div className="p-3 bg-teal-50 rounded-lg border border-teal-200">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+              <div className="p-3 bg-ok-tint rounded-lg border border-ok/20">
+                <label className="block text-sm font-medium text-ink mb-2">
                   Placement Bid Adjustment
                 </label>
                 <div className="flex items-center gap-3">
@@ -848,7 +856,7 @@ function RuleModal({
                     <option value="increase_placement">Raise adjustment</option>
                     <option value="decrease_placement">Lower adjustment</option>
                   </select>
-                  <span className="text-sm text-gray-600">by</span>
+                  <span className="text-sm text-ink-muted">by</span>
                   <input
                     type="number"
                     min="1"
@@ -860,9 +868,9 @@ function RuleModal({
                     }))}
                     className="input text-sm py-1.5 w-20"
                   />
-                  <span className="text-sm text-gray-600">points</span>
+                  <span className="text-sm text-ink-muted">points</span>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
+                <p className="text-xs text-ink-muted mt-2">
                   Amazon&apos;s placement setting is a percentage uplift on your keyword
                   bid, from 0% to 900%. This adds or subtracts percentage
                   <span className="font-medium"> points</span> — 0% raised by 25 becomes
@@ -874,21 +882,21 @@ function RuleModal({
             )}
 
             {/* Info note */}
-            <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100 text-xs text-blue-700">
-              <span className="text-base leading-none mt-0.5">ℹ️</span>
+            <div className="flex items-start gap-2 p-3 bg-accent-weak rounded-lg border border-accent-edge text-xs text-accent">
+              <Info size={15} className="mt-0.5 shrink-0" aria-hidden />
               <span>
                 Rules create <strong>Suggestions only</strong>. Nothing is applied to Amazon automatically.
-                Every suggestion requires manual approval in the Suggestion Inbox.
+                Every suggestion requires manual approval on the Suggestions screen.
               </span>
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">{error}</div>
+              <Notice tone="danger">{error}</Notice>
             )}
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3 bg-gray-50">
+          <div className="px-6 py-4 border-t border-hairline flex items-center justify-end gap-3 bg-surface-sunken">
             <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
             <button type="submit" disabled={saving} className="btn-primary disabled:opacity-50">
               {saving ? 'Saving…' : mode === 'create' ? 'Create Rule' : 'Save Changes'}
@@ -1073,8 +1081,8 @@ export default function RulesPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Rules Engine</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Rules</h1>
+          <p className="text-sm text-ink-muted mt-0.5">
             Configurable rules that create Suggestions. Nothing is auto-applied to Amazon.
           </p>
         </div>
@@ -1084,7 +1092,7 @@ export default function RulesPage() {
                 blank condition form gives no hint what a sane threshold is. */}
             <button
               onClick={() => setShowTemplates(true)}
-              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+              className="px-4 py-2 text-sm border border-line rounded-lg hover:bg-surface-sunken"
             >
               Start from template
             </button>
@@ -1100,40 +1108,36 @@ export default function RulesPage() {
 
       {/* Stats strip */}
       {!noContext && !noProfiles && rules.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Total Rules',    value: stats.total,    color: 'border-gray-200 bg-white' },
-            { label: 'Enabled',        value: stats.enabled,  color: 'border-green-200 bg-green-50' },
-            { label: 'Disabled',       value: stats.disabled, color: 'border-gray-200 bg-gray-50' },
-          ].map(({ label, value, color }) => (
-            <div key={label} className={`rounded-xl border p-4 ${color}`}>
-              <p className="text-xs text-gray-500">{label}</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
-            </div>
-          ))}
-        </div>
+        <StatBar
+          stats={[
+            { label: 'Rules',    value: stats.total },
+            // Enabled is the only one that says whether anything is actually
+            // happening, so it is the only one that carries a tone.
+            { label: 'Enabled',  value: stats.enabled, hint: 'running on schedule',
+              tone: stats.enabled > 0 ? 'ok' : undefined },
+            { label: 'Disabled', value: stats.disabled, hint: 'idle' },
+          ]}
+        />
       )}
 
       {/* Toasts */}
       {toast && (
-        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">
-          ✓ {toast}
-        </div>
+        <Notice tone="ok">{toast}
+        </Notice>
       )}
       {toastErr && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">
-          ✗ {toastErr}
-        </div>
+        <Notice tone="danger">{toastErr}
+        </Notice>
       )}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>
+        <Notice tone="danger">{error}</Notice>
       )}
 
       {noContext && (
-        <div className="card text-center py-12 text-gray-500">Select an account to manage rules.</div>
+        <div className="card text-center py-12 text-ink-muted">Select an account to manage rules.</div>
       )}
       {noProfiles && (
-        <div className="card text-center py-12 text-gray-500">
+        <div className="card text-center py-12 text-ink-muted">
           No profiles synced. Go to Settings → Accounts and sync profiles first.
         </div>
       )}
@@ -1143,25 +1147,25 @@ export default function RulesPage() {
         <div className="card p-0 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Name</th>
+              <tr className="border-b border-hairline bg-surface-sunken">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted">Name</th>
                 {showMarketplaceCol && (
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-24">Marketplace</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-24">Marketplace</th>
                 )}
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-28">Type</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-20">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-28">Creates</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-20">Lookback</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-28">Created</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 w-52">Actions</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-28">Type</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-20">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-28">Creates</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-20">Lookback</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-28">Created</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-ink-muted w-52">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-hairline">
               {loading ? (
-                <tr><td colSpan={showMarketplaceCol ? 8 : 7} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={showMarketplaceCol ? 8 : 7} className="px-4 py-12 text-center text-ink-subtle">Loading…</td></tr>
               ) : rules.length === 0 ? (
                 <tr><td colSpan={showMarketplaceCol ? 8 : 7} className="px-4 py-16 text-center">
-                  <div className="text-gray-400 mb-3 text-base">No rules yet</div>
+                  <div className="text-ink-subtle mb-3 text-base">No rules yet</div>
                   <button
                     onClick={() => { setSeed(undefined); setModalMode('create') }}
                     className="btn-primary text-sm"
@@ -1174,103 +1178,86 @@ export default function RulesPage() {
                 const runRes    = runResult[rule.id]
                 const config    = rule.configuration_json
                 return (
-                  <tr key={rule.id} className="hover:bg-gray-50">
+                  <tr key={rule.id} className="hover:bg-surface-sunken">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900 truncate max-w-[200px]" title={rule.name}>
+                      <div className="font-medium text-ink truncate max-w-[200px]" title={rule.name}>
                         {rule.name}
                       </div>
                       {rule.description && (
-                        <div className="text-xs text-gray-400 truncate max-w-[200px] mt-0.5" title={rule.description}>
+                        <div className="text-xs text-ink-subtle truncate max-w-[200px] mt-0.5" title={rule.description}>
                           {rule.description}
                         </div>
                       )}
                       {runRes && (
-                        <div className="text-xs text-green-600 mt-1">
-                          ✓ {runRes.suggestions_generated} suggestions created ({runRes.rows_evaluated} rows, {runRes.duration_ms}ms)
+                        <div className="text-xs text-ok mt-1">
+                          {runRes.suggestions_generated} suggestions created ({runRes.rows_evaluated} rows, {runRes.duration_ms}ms)
                         </div>
                       )}
                     </td>
                     {showMarketplaceCol && (
                       <td className="px-4 py-3">
-                        <span className="text-xs font-medium text-gray-600 bg-gray-100 rounded px-2 py-0.5">
+                        <span className="text-xs font-medium text-ink-muted bg-surface-sunken rounded px-2 py-0.5">
                           {profileLabel(rule.profile_id)}
                         </span>
                       </td>
                     )}
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${RULE_TYPE_COLORS[rule.rule_type] ?? 'bg-gray-100 text-gray-600'}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${RULE_TYPE_COLORS[rule.rule_type] ?? 'bg-surface-sunken text-ink-muted'}`}>
                         {RULE_TYPE_LABELS[rule.rule_type] ?? rule.rule_type}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        rule.status === 'enabled' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                      }`}>
+                      <Badge tone={rule.status === 'enabled' ? 'ok' : 'neutral'}>
                         {rule.status}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-600">
+                    <td className="px-4 py-3 text-xs text-ink-muted">
                       {config.suggestion_type?.replace(/_/g, ' ') ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-600">
+                    <td className="px-4 py-3 text-xs text-ink-muted">
                       {config.lookback_days ?? 30}d
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
+                    <td className="px-4 py-3 text-xs text-ink-muted">
                       {fmtDate(rule.created_at)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                        {/* Run */}
-                        <button
+                      <div className="flex items-center justify-end gap-1">
+                        {/* One visible action, the rest in a menu.
+                            This row previously carried six controls that wrapped
+                            onto two lines — fifteen buttons across three rows,
+                            with Delete a few pixels from Enable. Nothing was
+                            removed; the row just stopped shouting. */}
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={isRunning}
                           onClick={() => handleRun(rule)}
-                          disabled={isRunning || rule.status !== 'enabled'}
-                          title={rule.status !== 'enabled' ? 'Enable rule to run' : 'Run now'}
-                          className="text-xs px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-medium"
+                          disabled={rule.status !== 'enabled'}
+                          title={rule.status !== 'enabled' ? 'Enable the rule to run it' : 'Run now'}
                         >
-                          {isRunning ? '⏳' : '▶ Run'}
-                        </button>
-                        {/* History */}
-                        <button
-                          onClick={() => handleViewHistory(rule)}
-                          className="text-xs px-2.5 py-1 bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-50 transition-colors"
-                          title="Execution history"
-                        >
-                          📋
-                        </button>
-                        {/* Edit */}
-                        <button
-                          onClick={() => { setEditRule(rule); setModalMode('edit') }}
-                          className="text-xs px-2.5 py-1 bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-50 transition-colors"
-                        >
-                          Edit
-                        </button>
-                        {/* Clone */}
-                        <button
-                          onClick={() => handleClone(rule)}
-                          className="text-xs px-2.5 py-1 bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-50 transition-colors"
-                          title="Clone (creates disabled copy)"
-                        >
-                          Clone
-                        </button>
-                        {/* Enable / Disable */}
-                        <button
-                          onClick={() => handleToggleStatus(rule)}
-                          className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                            rule.status === 'enabled'
-                              ? 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                              : 'bg-white border-green-300 text-green-600 hover:bg-green-50'
-                          }`}
-                        >
-                          {rule.status === 'enabled' ? 'Disable' : 'Enable'}
-                        </button>
-                        {/* Delete */}
-                        <button
-                          onClick={() => handleDelete(rule)}
-                          className="text-xs px-2.5 py-1 bg-white border border-red-200 text-red-500 rounded hover:bg-red-50 transition-colors"
-                          title="Delete rule"
-                        >
-                          ✕
-                        </button>
+                          <Play aria-hidden />
+                          Run
+                        </Button>
+                        <RowMenu label={`Actions for ${rule.name}`}>
+                          <MenuItem onSelect={() => { setEditRule(rule); setModalMode('edit') }}>
+                            <Pencil aria-hidden /> Edit
+                          </MenuItem>
+                          <MenuItem onSelect={() => handleViewHistory(rule)}>
+                            <History aria-hidden /> Execution history
+                          </MenuItem>
+                          <MenuItem onSelect={() => handleClone(rule)}>
+                            <Copy aria-hidden /> Duplicate
+                          </MenuItem>
+                          <MenuItem onSelect={() => handleToggleStatus(rule)}>
+                            {rule.status === 'enabled'
+                              ? <><PauseCircle aria-hidden /> Disable</>
+                              : <><PlayCircle aria-hidden /> Enable</>}
+                          </MenuItem>
+                          <MenuSeparator />
+                          <MenuItem danger onSelect={() => handleDelete(rule)}>
+                            <Trash2 aria-hidden /> Delete
+                          </MenuItem>
+                        </RowMenu>
                       </div>
                     </td>
                   </tr>
@@ -1355,41 +1342,41 @@ function TemplatePickerModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
-        <div className="flex items-start justify-between px-6 py-4 border-b border-gray-200">
+      <div className="bg-surface rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div className="flex items-start justify-between px-6 py-4 border-b border-hairline">
           <div>
-            <h2 className="font-semibold text-gray-900">Start from a template</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <h2 className="font-semibold text-ink">Start from a template</h2>
+            <p className="text-xs text-ink-muted mt-0.5">
               You can change every threshold after picking one. Nothing runs until you save.
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted text-xl leading-none">×</button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
           {loading ? (
-            <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>
+            <p className="text-sm text-ink-subtle py-8 text-center">Loading…</p>
           ) : error ? (
-            <p className="text-sm text-red-600 py-8 text-center">{error}</p>
+            <p className="text-sm text-danger py-8 text-center">{error}</p>
           ) : templates.length === 0 ? (
-            <p className="text-sm text-gray-400 py-8 text-center">No templates available.</p>
+            <p className="text-sm text-ink-subtle py-8 text-center">No templates available.</p>
           ) : templates.map(t => (
             <button
               key={t.id}
               onClick={() => onPick(t)}
-              className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-blue-400 hover:bg-blue-50/40 transition-colors"
+              className="w-full text-left border border-hairline rounded-lg p-3 hover:border-accent hover:bg-accent-weak/40 transition-colors"
             >
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs px-2 py-0.5 rounded font-medium ${RULE_TYPE_COLORS[t.rule_type] ?? 'bg-gray-100 text-gray-600'}`}>
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${RULE_TYPE_COLORS[t.rule_type] ?? 'bg-surface-sunken text-ink-muted'}`}>
                   {RULE_TYPE_LABELS[t.rule_type] ?? t.rule_type}
                 </span>
-                <span className="font-medium text-gray-900 text-sm">{t.name}</span>
+                <span className="font-medium text-ink text-sm">{t.name}</span>
                 {t.is_builtin && (
-                  <span className="text-[10px] uppercase tracking-wide text-gray-400 ml-auto">built-in</span>
+                  <span className="text-[10px] uppercase tracking-wide text-ink-subtle ml-auto">built-in</span>
                 )}
               </div>
-              {t.description && <p className="text-xs text-gray-600 mb-1.5">{t.description}</p>}
-              <p className="text-xs font-mono text-gray-500">{describe(t)}</p>
+              {t.description && <p className="text-xs text-ink-muted mb-1.5">{t.description}</p>}
+              <p className="text-xs font-mono text-ink-muted">{describe(t)}</p>
             </button>
           ))}
         </div>

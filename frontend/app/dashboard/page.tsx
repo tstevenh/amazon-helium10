@@ -133,14 +133,14 @@ export default function DashboardPage() {
         onClick={() => router.push('/sync-monitor')}
         className={`w-full text-left rounded-xl border p-3 transition-colors ${
           dataIsStale
-            ? 'border-red-200 bg-red-50 hover:bg-red-100'
-            : 'border-green-200 bg-green-50 hover:bg-green-100'
+            ? 'border-danger/20 bg-danger-tint hover:bg-danger-tint'
+            : 'border-ok/20 bg-ok-tint hover:bg-ok-tint'
         }`}
       >
-        <span className={`text-sm font-medium ${dataIsStale ? 'text-red-800' : 'text-green-800'}`}>
-          {dataIsStale ? '⚠ Data may be out of date' : '✓ Data is current'}
+        <span className={`text-sm font-medium ${dataIsStale ? 'text-danger' : 'text-ok'}`}>
+          {dataIsStale ? 'Data may be out of date' : 'Data is current'}
         </span>
-        <span className={`text-sm ml-2 ${dataIsStale ? 'text-red-700' : 'text-green-700'}`}>
+        <span className={`text-sm ml-2 ${dataIsStale ? 'text-danger' : 'text-ok'}`}>
           {hoursSinceSync == null
             ? 'No sync has completed successfully yet.'
             : `Synced ${hoursSinceSync < 1 ? 'less than an hour' : `${Math.floor(hoursSinceSync)} hours`} ago.`}
@@ -151,44 +151,44 @@ export default function DashboardPage() {
       {/* What changed — spec §13.1's anomaly panel. Above the KPI numbers on
           purpose: an average hides the campaign that broke yesterday. */}
       {anomalies.length > 0 && (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900 text-sm">Needs a look</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
+        <div className="rounded-xl border border-hairline bg-surface overflow-hidden">
+          <div className="px-4 py-3 border-b border-hairline">
+            <h2 className="font-semibold text-ink text-sm">Needs a look</h2>
+            <p className="text-xs text-ink-muted mt-0.5">
               Campaigns that changed sharply in the last few days versus the two
               weeks before. Not threshold breaches — changes.
             </p>
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-hairline">
             {anomalies.slice(0, 6).map((a, i) => (
               <button
                 key={`${a.campaign_id}-${a.type}-${i}`}
                 onClick={() => router.push(`/campaigns/${a.campaign_id}`)}
-                className="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3"
+                className="w-full text-left px-4 py-3 hover:bg-surface-sunken flex items-start gap-3"
               >
                 <span className={`mt-0.5 shrink-0 text-xs px-2 py-0.5 rounded font-medium ${
                   a.severity === 'high'
-                    ? 'bg-red-100 text-red-700'
-                    : 'bg-yellow-100 text-yellow-800'
+                    ? 'bg-danger-tint text-danger'
+                    : 'bg-warn-tint text-warn'
                 }`}>
                   {a.severity}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-gray-900 truncate">
+                  <span className="block text-sm font-medium text-ink truncate">
                     {a.headline}
                   </span>
-                  <span className="block text-xs text-gray-500 truncate">
+                  <span className="block text-xs text-ink-muted truncate">
                     {a.campaign_name}
                     {a.marketplace && ` · ${a.marketplace}`}
                     {a.campaign_status !== 'enabled' && ` · ${a.campaign_status}`}
                   </span>
-                  <span className="block text-xs text-gray-400 mt-0.5">{a.detail}</span>
+                  <span className="block text-xs text-ink-subtle mt-0.5">{a.detail}</span>
                 </span>
               </button>
             ))}
           </div>
           {anomalies.length > 6 && (
-            <p className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
+            <p className="px-4 py-2 text-xs text-ink-subtle border-t border-hairline">
               {anomalies.length - 6} more not shown.
             </p>
           )}
@@ -201,14 +201,14 @@ export default function DashboardPage() {
           { label: 'Spend',  value: fmt.currency(kpis.spend) },
           { label: 'Sales',  value: fmt.currency(kpis.sales) },
           { label: 'ACOS',   value: fmt.acos(kpis.acos),
-            cls: kpis.acos == null ? '' : kpis.acos > 40 ? 'text-red-600' : kpis.acos > 25 ? 'text-yellow-700' : 'text-green-600' },
+            cls: kpis.acos == null ? '' : kpis.acos > 40 ? 'text-danger' : kpis.acos > 25 ? 'text-warn' : 'text-ok' },
           { label: 'ROAS',   value: fmt.roas(kpis.roas) },
           { label: 'Orders', value: fmt.int(kpis.orders) },
           { label: 'Clicks', value: fmt.int(kpis.clicks) },
         ].map(k => (
-          <div key={k.label} className="rounded-xl border border-gray-200 bg-white p-4">
-            <p className="text-xs text-gray-500">{k.label}</p>
-            <p className={`text-xl font-bold mt-1 ${k.cls ?? 'text-gray-900'}`}>{k.value}</p>
+          <div key={k.label} className="rounded-xl border border-hairline bg-surface p-4">
+            <p className="text-xs text-ink-muted">{k.label}</p>
+            <p className={`text-xl font-bold mt-1 ${k.cls ?? 'text-ink'}`}>{k.value}</p>
           </div>
         ))}
       </div>
@@ -217,24 +217,24 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <button
           onClick={() => router.push('/suggestions')}
-          className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
+          className="rounded-xl border border-hairline bg-surface p-4 text-left hover:border-accent-edge hover:bg-accent-weak/40 transition-colors"
         >
-          <p className="text-xs text-gray-500">Suggestions awaiting review</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{pending.length}</p>
-          <p className="text-xs text-blue-600 mt-1">Open inbox →</p>
+          <p className="text-xs text-ink-muted">Suggestions awaiting review</p>
+          <p className="text-2xl font-bold text-ink mt-1">{pending.length}</p>
+          <p className="text-xs text-accent mt-1">Open inbox →</p>
         </button>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500">Active campaigns</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{kpis.active}</p>
-          <p className="text-xs text-gray-400 mt-1">of {campaigns.length} total</p>
+        <div className="rounded-xl border border-hairline bg-surface p-4">
+          <p className="text-xs text-ink-muted">Active campaigns</p>
+          <p className="text-2xl font-bold text-ink mt-1">{kpis.active}</p>
+          <p className="text-xs text-ink-subtle mt-1">of {campaigns.length} total</p>
         </div>
         <button
           onClick={() => router.push('/logs')}
-          className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-blue-300 hover:bg-blue-50/40 transition-colors"
+          className="rounded-xl border border-hairline bg-surface p-4 text-left hover:border-accent-edge hover:bg-accent-weak/40 transition-colors"
         >
-          <p className="text-xs text-gray-500">Changes sent to Amazon</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{changeCount}</p>
-          <p className="text-xs text-blue-600 mt-1">View log →</p>
+          <p className="text-xs text-ink-muted">Changes sent to Amazon</p>
+          <p className="text-2xl font-bold text-ink mt-1">{changeCount}</p>
+          <p className="text-xs text-accent mt-1">View log →</p>
         </button>
       </div>
 
@@ -272,26 +272,26 @@ function CampaignList({
 }) {
   return (
     <div className="card">
-      <h2 className="font-semibold text-gray-900">{title}</h2>
-      <p className="text-xs text-gray-500 mb-3">{subtitle}</p>
+      <h2 className="font-semibold text-ink">{title}</h2>
+      <p className="text-xs text-ink-muted mb-3">{subtitle}</p>
       {loading ? (
-        <p className="text-sm text-gray-400 py-6 text-center">Loading…</p>
+        <p className="text-sm text-ink-subtle py-6 text-center">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-400 py-6 text-center">{empty}</p>
+        <p className="text-sm text-ink-subtle py-6 text-center">{empty}</p>
       ) : (
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-hairline">
           {rows.map(c => (
             <button
               key={c.id}
               onClick={() => onClick(c.id)}
-              className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-gray-50 -mx-2 px-2 rounded"
+              className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-surface-sunken -mx-2 px-2 rounded"
             >
-              <span className="text-sm text-gray-800 truncate flex-1" title={c.name}>{c.name}</span>
-              <span className="text-sm font-medium text-gray-900 shrink-0">{fmt.currency(c.spend)}</span>
+              <span className="text-sm text-ink truncate flex-1" title={c.name}>{c.name}</span>
+              <span className="text-sm font-medium text-ink shrink-0">{fmt.currency(c.spend)}</span>
               <span className={`text-sm shrink-0 w-16 text-right ${
-                c.acos == null ? 'text-gray-400'
-                  : Number(c.acos) > 40 ? 'text-red-600'
-                  : Number(c.acos) > 25 ? 'text-yellow-700' : 'text-green-600'
+                c.acos == null ? 'text-ink-subtle'
+                  : Number(c.acos) > 40 ? 'text-danger'
+                  : Number(c.acos) > 25 ? 'text-warn' : 'text-ok'
               }`}>
                 {fmt.acos(c.acos)}
               </span>

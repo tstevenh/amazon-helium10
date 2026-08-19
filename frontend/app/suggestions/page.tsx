@@ -533,7 +533,7 @@ export default function SuggestionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-ink">Suggestion Inbox</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Suggestions</h1>
           <p className="text-sm text-ink-muted mt-0.5">
             {/* Not AI: every suggestion comes from a threshold rule you can read
                 and edit on the Rules page. Saying "AI" would hide that. */}

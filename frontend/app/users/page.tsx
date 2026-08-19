@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { api, ApiError } from '@/lib/api'
 import type { ManagedUser } from '@/lib/types'
+import { Notice } from '@/components/ui/Notice'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -81,7 +82,7 @@ export default function UsersPage() {
     return (
       <div>
         <PageHeader title="Users" subtitle="Admin only" />
-        <div className="card text-center py-12 text-gray-500">
+        <div className="card text-center py-12 text-ink-muted">
           Only admins can manage users. Ask an admin if you need an account changed.
         </div>
       </div>
@@ -101,52 +102,52 @@ export default function UsersPage() {
       </div>
 
       {toast && (
-        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">✓ {toast}</div>
+        <Notice tone="ok">{toast}</Notice>
       )}
       {toastErr && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">✗ {toastErr}</div>
+        <Notice tone="danger">{toastErr}</Notice>
       )}
 
       <div className="card p-0 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Name</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Email</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-28">Role</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-24">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-32">Added</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 w-64">Actions</th>
+            <tr className="border-b border-hairline bg-surface-sunken">
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted">Name</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted">Email</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-28">Role</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-24">Status</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-32">Added</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-ink-muted w-64">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-hairline">
             {loading ? (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-ink-subtle">Loading…</td></tr>
             ) : users.map(u => {
               const isSelf = u.id === user.id
               return (
-                <tr key={u.id} className={u.is_active ? 'hover:bg-gray-50' : 'bg-gray-50/60 text-gray-400'}>
-                  <td className="px-4 py-3 font-medium text-gray-900">
+                <tr key={u.id} className={u.is_active ? 'hover:bg-surface-sunken' : 'bg-surface-sunken/60 text-ink-subtle'}>
+                  <td className="px-4 py-3 font-medium text-ink">
                     {u.name}
-                    {isSelf && <span className="ml-2 text-xs text-gray-400">(you)</span>}
+                    {isSelf && <span className="ml-2 text-xs text-ink-subtle">(you)</span>}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{u.email}</td>
+                  <td className="px-4 py-3 text-ink-muted">{u.email}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                      u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
+                      u.role === 'admin' ? 'bg-accent-weak text-accent' : 'bg-surface-sunken text-ink-muted'
                     }`}>{u.role}</span>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                      u.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                      u.is_active ? 'bg-ok-tint text-ok' : 'bg-surface-sunken text-ink-muted'
                     }`}>{u.is_active ? 'active' : 'disabled'}</span>
                   </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(u.created_at)}</td>
+                  <td className="px-4 py-3 text-ink-muted text-xs">{fmtDate(u.created_at)}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2 justify-end flex-wrap">
                       <button
                         onClick={() => setPwFor(u)}
-                        className="text-xs px-2.5 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50"
+                        className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken"
                       >
                         Set password
                       </button>
@@ -155,7 +156,7 @@ export default function UsersPage() {
                                              u.role === 'admin' ? 'now a standard user' : 'now an admin')}
                         disabled={isSelf}
                         title={isSelf ? 'You cannot change your own role' : undefined}
-                        className="text-xs px-2.5 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {u.role === 'admin' ? 'Make user' : 'Make admin'}
                       </button>
@@ -166,8 +167,8 @@ export default function UsersPage() {
                         title={isSelf ? 'You cannot disable your own account' : undefined}
                         className={`text-xs px-2.5 py-1 rounded border disabled:opacity-40 disabled:cursor-not-allowed ${
                           u.is_active
-                            ? 'bg-white border-red-200 text-red-600 hover:bg-red-50'
-                            : 'bg-white border-green-200 text-green-700 hover:bg-green-50'
+                            ? 'bg-surface border-danger/20 text-danger hover:bg-danger-tint'
+                            : 'bg-surface border-ok/20 text-ok hover:bg-ok-tint'
                         }`}
                       >
                         {u.is_active ? 'Disable' : 'Enable'}
@@ -181,7 +182,7 @@ export default function UsersPage() {
         </table>
       </div>
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-ink-subtle">
         Disabling an account blocks sign-in immediately but keeps that person&apos;s
         name on everything they approved. Accounts are never deleted, so the audit
         trail stays readable.
@@ -230,23 +231,23 @@ function CreateUserModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-900">Add User</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+      <div className="bg-surface rounded-xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline">
+          <h2 className="font-semibold text-ink">Add User</h2>
+          <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted text-xl leading-none">×</button>
         </div>
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+            <label className="block text-sm font-medium text-ink mb-1">Name <span className="text-danger">*</span></label>
             <input className="input w-full" value={name} onChange={e => setName(e.target.value)} required />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
+            <label className="block text-sm font-medium text-ink mb-1">Email <span className="text-danger">*</span></label>
             <input type="email" className="input w-full" value={email} onChange={e => setEmail(e.target.value)} required />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Initial password <span className="text-red-500">*</span>
+            <label className="block text-sm font-medium text-ink mb-1">
+              Initial password <span className="text-danger">*</span>
             </label>
             <input
               type="text"
@@ -256,22 +257,22 @@ function CreateUserModal({
               minLength={MIN_PASSWORD}
               required
             />
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-ink-subtle mt-1">
               At least {MIN_PASSWORD} characters. Shown in plain text because you have to
               pass it to them — this app cannot send email. Ask them to change it after
               first sign-in.
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <label className="block text-sm font-medium text-ink mb-1">Role</label>
             <select className="input w-full" value={role} onChange={e => setRole(e.target.value)}>
               <option value="user">User — approve and apply suggestions</option>
               <option value="admin">Admin — also manages accounts and users</option>
             </select>
           </div>
-          {error && <div className="bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && <Notice tone="danger">{error}</Notice>}
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-line rounded hover:bg-surface-sunken">Cancel</button>
             <button type="submit" disabled={saving} className="btn-primary disabled:opacity-50">
               {saving ? 'Creating…' : 'Create User'}
             </button>
@@ -304,14 +305,14 @@ function PasswordModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-900">Set password</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+      <div className="bg-surface rounded-xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline">
+          <h2 className="font-semibold text-ink">Set password</h2>
+          <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted text-xl leading-none">×</button>
         </div>
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
-          <p className="text-sm text-gray-600">
-            New password for <span className="font-medium text-gray-900">{user.email}</span>.
+          <p className="text-sm text-ink-muted">
+            New password for <span className="font-medium text-ink">{user.email}</span>.
             Their existing sessions stay valid until the token expires.
           </p>
           <input
@@ -324,9 +325,9 @@ function PasswordModal({
             required
             autoFocus
           />
-          {error && <div className="bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && <Notice tone="danger">{error}</Notice>}
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm border border-line rounded hover:bg-surface-sunken">Cancel</button>
             <button type="submit" disabled={saving} className="btn-primary disabled:opacity-50">
               {saving ? 'Saving…' : 'Set password'}
             </button>

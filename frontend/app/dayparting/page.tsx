@@ -14,8 +14,10 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
+import { X } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import type { Campaign, DaypartingEntryInput, DaypartingSchedule, DaypartingRun } from '@/lib/types'
+import { Notice } from '@/components/ui/Notice'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -31,11 +33,11 @@ function hourLabel(h: number): string {
 }
 
 const OUTCOME_STYLE: Record<string, string> = {
-  applied: 'bg-blue-100 text-blue-700',
-  already_correct: 'bg-gray-100 text-gray-600',
-  skipped_writes_disabled: 'bg-yellow-100 text-yellow-800',
-  skipped_no_timezone: 'bg-yellow-100 text-yellow-800',
-  failed: 'bg-red-100 text-red-700',
+  applied: 'bg-info-tint text-accent',
+  already_correct: 'bg-surface-sunken text-ink-muted',
+  skipped_writes_disabled: 'bg-warn-tint text-warn',
+  skipped_no_timezone: 'bg-warn-tint text-warn',
+  failed: 'bg-danger-tint text-danger',
 }
 
 function outcomeLabel(o: string): string {
@@ -187,7 +189,7 @@ export default function DaypartingPage() {
       </div>
 
       {activeCount > 0 && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+        <div className="rounded-xl border border-accent-edge bg-accent-weak p-3 text-sm text-accent">
           <span className="font-medium">
             {activeCount} schedule{activeCount === 1 ? '' : 's'} running.
           </span>{' '}
@@ -196,15 +198,15 @@ export default function DaypartingPage() {
         </div>
       )}
 
-      {toast && <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">✓ {toast}</div>}
-      {toastErr && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">✗ {toastErr}</div>}
+      {toast && <Notice tone="ok">{toast}</Notice>}
+      {toastErr && <Notice tone="danger">{toastErr}</Notice>}
 
       {loading && schedules.length === 0 ? (
-        <div className="card text-center py-12 text-gray-400">Loading…</div>
+        <div className="card text-center py-12 text-ink-subtle">Loading…</div>
       ) : schedules.length === 0 ? (
         <div className="card text-center py-14">
-          <p className="text-gray-500 mb-1">No schedules yet</p>
-          <p className="text-sm text-gray-400 mb-4 max-w-md mx-auto">
+          <p className="text-ink-muted mb-1">No schedules yet</p>
+          <p className="text-sm text-ink-subtle mb-4 max-w-md mx-auto">
             A schedule turns campaigns off during hours you choose — for example
             midnight to 6am on weekdays — and back on afterwards.
           </p>
@@ -219,46 +221,46 @@ export default function DaypartingPage() {
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-gray-900">{s.name}</h3>
+                    <h3 className="font-semibold text-ink">{s.name}</h3>
                     <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                      s.is_active ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                      s.is_active ? 'bg-info-tint text-accent' : 'bg-surface-sunken text-ink-muted'
                     }`}>
                       {s.is_active ? 'running' : 'stopped'}
                     </span>
                   </div>
-                  {s.description && <p className="text-sm text-gray-500 mt-0.5">{s.description}</p>}
-                  <p className="text-xs text-gray-400 mt-1">
+                  {s.description && <p className="text-sm text-ink-muted mt-0.5">{s.description}</p>}
+                  <p className="text-xs text-ink-subtle mt-1">
                     {s.campaign_ids.length} campaign{s.campaign_ids.length === 1 ? '' : 's'} ·{' '}
                     {s.entries.length} window{s.entries.length === 1 ? '' : 's'}
                     {s.activated_at && ` · started ${new Date(s.activated_at).toLocaleDateString()}`}
                   </p>
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  <button onClick={() => preview(s)} className="text-xs px-2.5 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50">
+                  <button onClick={() => preview(s)} className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken">
                     What would it do now?
                   </button>
-                  <button onClick={() => setRunsFor(s)} className="text-xs px-2.5 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50">
+                  <button onClick={() => setRunsFor(s)} className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken">
                     History
                   </button>
-                  <button onClick={() => setEditing(s)} className="text-xs px-2.5 py-1 bg-white border border-gray-300 rounded hover:bg-gray-50">
+                  <button onClick={() => setEditing(s)} className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken">
                     Edit
                   </button>
                   {s.is_active ? (
-                    <button onClick={() => deactivate(s)} className="text-xs px-2.5 py-1 bg-white border border-red-200 text-red-600 rounded hover:bg-red-50">
+                    <button onClick={() => deactivate(s)} className="text-xs px-2.5 py-1 bg-surface border border-danger/20 text-danger rounded hover:bg-danger-tint">
                       Stop
                     </button>
                   ) : (
-                    <button onClick={() => activate(s)} className="text-xs px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
+                    <button onClick={() => activate(s)} className="text-xs px-2.5 py-1 bg-accent text-white rounded hover:bg-accent-hover">
                       Activate
                     </button>
                   )}
-                  <button onClick={() => remove(s)} className="text-xs px-2 py-1 bg-white border border-red-200 text-red-500 rounded hover:bg-red-50">
-                    ✕
+                  <button onClick={() => remove(s)} className="text-xs px-2 py-1 bg-surface border border-danger/20 text-danger rounded hover:bg-danger-tint">
+                    <X size={14} aria-hidden />
                   </button>
                 </div>
               </div>
               <ScheduleGridPreview schedule={s} />
-              <p className="text-xs text-gray-400 mt-2">
+              <p className="text-xs text-ink-subtle mt-2">
                 Campaigns: {s.campaign_ids.map(campaignName).join(', ') || '—'}
               </p>
             </div>
@@ -266,7 +268,7 @@ export default function DaypartingPage() {
         </div>
       )}
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-ink-subtle">
         Hours are local to the marketplace. Outside its windows a schedule puts
         back what it changed — so you only need to mark the hours you want
         paused. It never switches on a campaign you paused yourself, because it
@@ -333,11 +335,11 @@ function parseSpec(spec: CellSpec) {
 /** Colour per action. Amber for down, blue for up — money leaving vs money spent. */
 function specColour(spec: CellSpec | undefined, filled: boolean): string {
   const action = spec?.split(':')[0]
-  if (action === 'pause') return filled ? 'bg-red-400 border-red-400' : 'bg-red-400'
-  if (action === 'enable') return filled ? 'bg-green-400 border-green-400' : 'bg-green-400'
-  if (action === 'decrease_bid') return filled ? 'bg-amber-400 border-amber-400' : 'bg-amber-400'
-  if (action === 'increase_bid') return filled ? 'bg-blue-400 border-blue-400' : 'bg-blue-400'
-  return filled ? 'bg-white border-gray-200 hover:border-gray-400' : 'bg-gray-100'
+  if (action === 'pause') return filled ? 'bg-danger border-danger' : 'bg-danger'
+  if (action === 'enable') return filled ? 'bg-ok border-ok' : 'bg-ok'
+  if (action === 'decrease_bid') return filled ? 'bg-warn border-warn' : 'bg-warn'
+  if (action === 'increase_bid') return filled ? 'bg-accent border-accent' : 'bg-accent'
+  return filled ? 'bg-surface border-hairline hover:border-line-strong' : 'bg-surface-sunken'
 }
 
 function specLabel(spec: CellSpec | undefined): string {
@@ -379,14 +381,14 @@ function ScheduleGridPreview({ schedule }: { schedule: DaypartingSchedule }) {
       <div className="inline-block">
         <div className="flex gap-[2px] mb-[2px] ml-9">
           {HOURS.map(h => (
-            <div key={h} className="w-3.5 text-[9px] text-gray-400 text-center">
+            <div key={h} className="w-3.5 text-[9px] text-ink-subtle text-center">
               {h % 6 === 0 ? hourLabel(h).replace('am', '').replace('pm', '') : ''}
             </div>
           ))}
         </div>
         {DAYS.map((day, dow) => (
           <div key={day} className="flex gap-[2px] mb-[2px] items-center">
-            <div className="w-9 text-[10px] text-gray-500">{day}</div>
+            <div className="w-9 text-[10px] text-ink-muted">{day}</div>
             {HOURS.map(h => {
               const spec = filled.get(`${dow}-${h}`)
               return (
@@ -399,12 +401,12 @@ function ScheduleGridPreview({ schedule }: { schedule: DaypartingSchedule }) {
             })}
           </div>
         ))}
-        <div className="flex gap-3 mt-1.5 ml-9 text-[10px] text-gray-500">
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" /> paused</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" /> enabled</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-400 inline-block" /> bid down</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block" /> bid up</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-gray-100 inline-block" /> normal (restored)</span>
+        <div className="flex gap-3 mt-1.5 ml-9 text-[10px] text-ink-muted">
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-danger inline-block" /> paused</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-ok inline-block" /> enabled</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-warn inline-block" /> bid down</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-accent inline-block" /> bid up</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-surface-sunken inline-block" /> normal (restored)</span>
         </div>
       </div>
     </div>
@@ -544,23 +546,23 @@ function ScheduleEditor({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[92vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-900">
+      <div className="bg-surface rounded-xl shadow-xl w-full max-w-4xl max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-hairline">
+          <h2 className="font-semibold text-ink">
             {schedule ? 'Edit schedule' : 'New schedule'}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted text-xl leading-none">×</button>
         </div>
 
         <form onSubmit={submit} className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-ink mb-1">Name <span className="text-danger">*</span></label>
               <input className="input w-full" value={name} onChange={e => setName(e.target.value)}
                      placeholder="e.g. Overnight pause" required />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Marketplace</label>
+              <label className="block text-sm font-medium text-ink mb-1">Marketplace</label>
               <select className="input w-full" value={profileId}
                       onChange={e => { setProfileId(e.target.value); setSelected(new Set()) }}
                       disabled={!!schedule}>
@@ -568,12 +570,12 @@ function ScheduleEditor({
                   <option key={p.id} value={p.id}>{p.country_code ?? p.marketplace_code}</option>
                 ))}
               </select>
-              {schedule && <p className="text-xs text-gray-400 mt-1">Cannot move a schedule between marketplaces.</p>}
+              {schedule && <p className="text-xs text-ink-subtle mt-1">Cannot move a schedule between marketplaces.</p>}
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <label className="block text-sm font-medium text-ink mb-1">Description</label>
             <input className="input w-full" value={description} onChange={e => setDescription(e.target.value)}
                    placeholder="Optional note for your team" />
           </div>
@@ -581,80 +583,80 @@ function ScheduleEditor({
           {/* Grid */}
           <div>
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-              <label className="block text-sm font-medium text-gray-700">
-                Hours <span className="text-red-500">*</span>
+              <label className="block text-sm font-medium text-ink">
+                Hours <span className="text-danger">*</span>
               </label>
               <div className="flex items-center gap-2 text-xs flex-wrap">
-                <span className="text-gray-500">Painting:</span>
+                <span className="text-ink-muted">Painting:</span>
                 <button type="button" onClick={() => setAction('pause')}
                         className={`px-2 py-1 rounded border ${action === 'pause'
-                          ? 'bg-red-500 text-white border-red-500' : 'bg-white border-gray-300'}`}>
+                          ? 'bg-danger-tint0 text-white border-danger' : 'bg-surface border-line'}`}>
                   Pause campaign
                 </button>
                 <button type="button" onClick={() => setAction('enable')}
                         className={`px-2 py-1 rounded border ${action === 'enable'
-                          ? 'bg-green-600 text-white border-green-600' : 'bg-white border-gray-300'}`}>
+                          ? 'bg-ok text-white border-ok' : 'bg-surface border-line'}`}>
                   Enable campaign
                 </button>
                 <button type="button" onClick={() => setAction('decrease_bid')}
                         className={`px-2 py-1 rounded border ${action === 'decrease_bid'
-                          ? 'bg-amber-500 text-white border-amber-500' : 'bg-white border-gray-300'}`}>
+                          ? 'bg-warn-tint0 text-white border-warn' : 'bg-surface border-line'}`}>
                   Decrease bid
                 </button>
                 <button type="button" onClick={() => setAction('increase_bid')}
                         className={`px-2 py-1 rounded border ${action === 'increase_bid'
-                          ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300'}`}>
+                          ? 'bg-accent text-white border-accent' : 'bg-surface border-line'}`}>
                   Increase bid
                 </button>
               </div>
             </div>
 
             {isBidAction && (
-              <div className="mb-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <div className="mb-2 p-3 rounded-lg bg-warn-tint border border-warn/20">
                 <div className="flex items-end gap-3 flex-wrap text-xs">
                   <label className="block">
-                    <span className="block text-gray-600 mb-1">
+                    <span className="block text-ink-muted mb-1">
                       {action === 'decrease_bid' ? 'Decrease by' : 'Increase by'} *
                     </span>
                     <div className="flex items-center gap-1">
                       <input type="number" min="0.01" max={action === 'decrease_bid' ? '99.99' : '900'}
                              step="1" value={pct} onChange={e => setPct(e.target.value)}
                              className="input w-20" />
-                      <span className="text-gray-500">%</span>
+                      <span className="text-ink-muted">%</span>
                     </div>
                   </label>
                   <label className="block">
-                    <span className="block text-gray-600 mb-1">Min bid</span>
+                    <span className="block text-ink-muted mb-1">Min bid</span>
                     <input type="number" min="0.02" step="0.01" placeholder="none"
                            value={minBid} onChange={e => setMinBid(e.target.value)}
                            className="input w-24" />
                   </label>
                   <label className="block">
-                    <span className="block text-gray-600 mb-1">Max bid</span>
+                    <span className="block text-ink-muted mb-1">Max bid</span>
                     <input type="number" min="0.02" step="0.01" placeholder="none"
                            value={maxBid} onChange={e => setMaxBid(e.target.value)}
                            className="input w-24" />
                   </label>
                 </div>
-                <p className="text-[11px] text-amber-900 mt-2 leading-relaxed">
+                <p className="text-[11px] text-warn mt-2 leading-relaxed">
                   Applied to each keyword&apos;s <strong>baseline bid</strong> — the bid it
                   had before this schedule touched it — not to the current bid, so it
                   never compounds. Outside these hours the baseline is restored.
                   Change the percentage and paint again to add a second, different
                   window on the same day.
                 </p>
-                <p className="text-[11px] text-amber-900 mt-1 leading-relaxed">
+                <p className="text-[11px] text-warn mt-1 leading-relaxed">
                   If someone edits a bid in Seller Central, this schedule stops
                   managing that keyword and notifies you rather than overwriting them.
                 </p>
               </div>
             )}
 
-            <div className="overflow-x-auto border border-gray-200 rounded-lg p-3">
+            <div className="overflow-x-auto border border-hairline rounded-lg p-3">
               <div className="inline-block">
                 <div className="flex gap-[2px] mb-1 ml-24">
                   {HOURS.map(h => (
-                    <div key={h} className="w-5 text-[9px] text-gray-400 text-center">
+                    <div key={h} className="w-5 text-[9px] text-ink-subtle text-center">
                       {h % 3 === 0 ? hourLabel(h) : ''}
                     </div>
                   ))}
@@ -662,11 +664,11 @@ function ScheduleEditor({
                 {DAYS.map((day, dow) => (
                   <div key={day} className="flex gap-[2px] mb-[2px] items-center">
                     <div className="w-24 flex items-center gap-1">
-                      <span className="text-xs text-gray-600 w-8">{day}</span>
+                      <span className="text-xs text-ink-muted w-8">{day}</span>
                       <button type="button" onClick={() => paintRow(dow, HOURS)}
-                              className="text-[9px] text-blue-600 hover:underline">all</button>
+                              className="text-[9px] text-accent hover:underline">all</button>
                       <button type="button" onClick={() => paintRow(dow, [0, 1, 2, 3, 4, 5])}
-                              className="text-[9px] text-blue-600 hover:underline">0-6</button>
+                              className="text-[9px] text-accent hover:underline">0-6</button>
                     </div>
                     {HOURS.map(h => {
                       const v = cells.get(`${dow}-${h}`)
@@ -684,7 +686,7 @@ function ScheduleEditor({
                 ))}
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-1.5">
+            <p className="text-xs text-ink-subtle mt-1.5">
               Mark <span className="font-medium">12am–6am</span> as paused and ads are
               off from midnight and back on at 6am exactly — you do{' '}
               <span className="font-medium">not</span> need to mark the rest of the day
@@ -697,15 +699,15 @@ function ScheduleEditor({
 
           {/* Campaigns */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Campaigns <span className="text-red-500">*</span>
-              <span className="text-xs font-normal text-gray-400 ml-2">{selected.size} selected</span>
+            <label className="block text-sm font-medium text-ink mb-1">
+              Campaigns <span className="text-danger">*</span>
+              <span className="text-xs font-normal text-ink-subtle ml-2">{selected.size} selected</span>
             </label>
-            <div className="border border-gray-200 rounded-lg max-h-44 overflow-y-auto divide-y divide-gray-100">
+            <div className="border border-hairline rounded-lg max-h-44 overflow-y-auto divide-y divide-hairline">
               {eligible.length === 0 ? (
-                <p className="text-sm text-gray-400 p-3">No campaigns in this marketplace.</p>
+                <p className="text-sm text-ink-subtle p-3">No campaigns in this marketplace.</p>
               ) : eligible.map(c => (
-                <label key={c.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+                <label key={c.id} className="flex items-center gap-2 px-3 py-2 hover:bg-surface-sunken cursor-pointer">
                   <input
                     type="checkbox"
                     checked={selected.has(c.id)}
@@ -715,23 +717,23 @@ function ScheduleEditor({
                       return next
                     })}
                   />
-                  <span className="text-sm text-gray-800 truncate flex-1">{c.name}</span>
-                  <span className="text-xs text-gray-400">{c.status}</span>
+                  <span className="text-sm text-ink truncate flex-1">{c.name}</span>
+                  <span className="text-xs text-ink-subtle">{c.status}</span>
                 </label>
               ))}
             </div>
           </div>
 
-          {error && <div className="bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && <Notice tone="danger">{error}</Notice>}
         </form>
 
-        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
-          <p className="text-xs text-gray-500">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-hairline">
+          <p className="text-xs text-ink-muted">
             Saving does not start it. You activate it separately.
           </p>
           <div className="flex gap-2">
             <button type="button" onClick={onClose}
-                    className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50">
+                    className="px-4 py-2 text-sm border border-line rounded hover:bg-surface-sunken">
               Cancel
             </button>
             <button onClick={submit} disabled={saving} className="btn-primary disabled:opacity-50">
@@ -765,40 +767,40 @@ function RunHistoryDrawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-white shadow-xl flex flex-col overflow-y-auto">
-        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-200 sticky top-0 bg-white">
+      <div className="relative w-full max-w-lg bg-surface shadow-xl flex flex-col overflow-y-auto">
+        <div className="flex items-start justify-between px-5 py-4 border-b border-hairline sticky top-0 bg-surface">
           <div>
-            <p className="text-xs text-gray-400 mb-1">Run history</p>
-            <h2 className="text-base font-semibold text-gray-900">{schedule.name}</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <p className="text-xs text-ink-subtle mb-1">Run history</p>
+            <h2 className="text-base font-semibold text-ink">{schedule.name}</h2>
+            <p className="text-xs text-ink-subtle mt-0.5">
               Every hourly check, including the ones where nothing needed changing.
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-ink-subtle hover:text-ink-muted text-xl leading-none">×</button>
         </div>
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-hairline">
           {loading ? (
-            <p className="p-5 text-sm text-gray-400 text-center">Loading…</p>
+            <p className="p-5 text-sm text-ink-subtle text-center">Loading…</p>
           ) : runs.length === 0 ? (
-            <p className="p-5 text-sm text-gray-400 text-center">
+            <p className="p-5 text-sm text-ink-subtle text-center">
               Nothing yet. Runs appear once the schedule is active, or when you
               use &quot;What would it do now?&quot;.
             </p>
           ) : runs.map(r => (
             <div key={r.id} className="px-5 py-3">
               <div className="flex items-center justify-between gap-2">
-                <span className={`text-xs px-2 py-0.5 rounded font-medium ${OUTCOME_STYLE[r.outcome] ?? 'bg-gray-100 text-gray-600'}`}>
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${OUTCOME_STYLE[r.outcome] ?? 'bg-surface-sunken text-ink-muted'}`}>
                   {outcomeLabel(r.outcome)}
                 </span>
-                <span className="text-xs text-gray-400">{r.local_time ?? new Date(r.ran_at).toLocaleString()}</span>
+                <span className="text-xs text-ink-subtle">{r.local_time ?? new Date(r.ran_at).toLocaleString()}</span>
               </div>
               {r.desired_state && (
-                <p className="text-xs text-gray-700 mt-1.5">
+                <p className="text-xs text-ink mt-1.5">
                   wanted <span className="font-medium">{r.desired_state}</span>
                   {r.previous_state && <> · was <span className="font-medium">{r.previous_state}</span></>}
                 </p>
               )}
-              {r.detail && <p className="text-xs text-gray-500 mt-1">{r.detail}</p>}
+              {r.detail && <p className="text-xs text-ink-muted mt-1">{r.detail}</p>}
             </div>
           ))}
         </div>

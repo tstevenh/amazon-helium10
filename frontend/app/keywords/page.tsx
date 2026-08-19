@@ -152,13 +152,13 @@ export default function KeywordsPage() {
   const columns: Column<TargetWithMetrics>[] = [
     {
       header: 'Keyword',
-      cell: row => <span className="font-medium text-gray-900">{row.expression_text || '—'}</span>,
+      cell: row => <span className="font-medium text-ink">{row.expression_text || '—'}</span>,
       sortValue: row => row.expression_text ?? '',
     },
     {
       header: 'Match Type',
       cell: row => (
-        <span className="text-xs font-mono bg-gray-100 rounded px-2 py-0.5 capitalize">
+        <span className="text-xs font-mono bg-surface-sunken rounded px-2 py-0.5 capitalize">
           {row.match_type ?? '—'}
         </span>
       ),
@@ -172,7 +172,7 @@ export default function KeywordsPage() {
     {
       header: 'Bid',
       cell: row => (
-        <span className="text-gray-700">
+        <span className="text-ink">
           {row.bid != null ? `$${Number(row.bid).toFixed(2)}` : '—'}
         </span>
       ),
@@ -185,11 +185,11 @@ export default function KeywordsPage() {
         return ag ? (
           <button
             onClick={e => { e.stopPropagation(); router.push(`/ad-groups/${ag.id}`) }}
-            className="text-blue-600 hover:underline text-sm text-left"
+            className="text-accent hover:underline text-sm text-left"
           >
             {ag.name}
           </button>
-        ) : <span className="text-gray-400 text-sm">—</span>
+        ) : <span className="text-ink-subtle text-sm">—</span>
       },
       sortValue: row => adGroupMap[row.ad_group_id]?.name ?? '',
     },
@@ -201,11 +201,11 @@ export default function KeywordsPage() {
         return camp ? (
           <button
             onClick={e => { e.stopPropagation(); router.push(`/campaigns/${camp.id}`) }}
-            className="text-blue-600 hover:underline text-sm text-left"
+            className="text-accent hover:underline text-sm text-left"
           >
             {camp.name}
           </button>
-        ) : <span className="text-gray-400 text-sm">—</span>
+        ) : <span className="text-ink-subtle text-sm">—</span>
       },
       sortValue: row => {
         const ag = adGroupMap[row.ad_group_id]
@@ -236,7 +236,7 @@ export default function KeywordsPage() {
         }
       />
       {totalKeywords > keywords.length && (
-        <div className="mb-4 px-4 py-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+        <div className="mb-4 px-4 py-2 bg-accent-weak border border-accent-edge rounded text-sm text-accent">
           Showing the top {keywords.length.toLocaleString()} keywords by spend, out of{' '}
           {totalKeywords.toLocaleString()}. The rest spent nothing over this period.
           {/* The old copy said "use the search box to find specific keywords",

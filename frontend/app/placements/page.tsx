@@ -99,11 +99,11 @@ export default function PlacementsPage() {
       />
 
       {loading && !data ? (
-        <div className="card text-center py-12 text-gray-400">Loading…</div>
+        <div className="card text-center py-12 text-ink-subtle">Loading…</div>
       ) : !hasData ? (
         <div className="card text-center py-14">
-          <p className="text-gray-500 mb-1">No placement data yet</p>
-          <p className="text-sm text-gray-400 max-w-md mx-auto">
+          <p className="text-ink-muted mb-1">No placement data yet</p>
+          <p className="text-sm text-ink-subtle max-w-md mx-auto">
             Placement figures come from a separate Amazon report that runs with the
             scheduled sync. It appears here after the next sync completes.
           </p>
@@ -118,36 +118,36 @@ export default function PlacementsPage() {
               const share = grandSpend > 0 ? (m.spend / grandSpend) * 100 : 0
               const acos = m.acos == null ? null : Number(m.acos)
               return (
-                <div key={p} className="rounded-xl border border-gray-200 bg-white p-4">
-                  <p className="text-xs font-medium text-gray-700">{PLACEMENT_LABEL[p] ?? p}</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">{fmt.currency(m.spend)}</p>
-                  <p className="text-xs text-gray-400">{share.toFixed(0)}% of spend</p>
-                  <div className="mt-2 pt-2 border-t border-gray-100 space-y-0.5 text-xs">
+                <div key={p} className="rounded-xl border border-hairline bg-surface p-4">
+                  <p className="text-xs font-medium text-ink">{PLACEMENT_LABEL[p] ?? p}</p>
+                  <p className="text-2xl font-bold text-ink mt-1">{fmt.currency(m.spend)}</p>
+                  <p className="text-xs text-ink-subtle">{share.toFixed(0)}% of spend</p>
+                  <div className="mt-2 pt-2 border-t border-hairline space-y-0.5 text-xs">
                     <p className="flex justify-between">
-                      <span className="text-gray-500">Sales</span>
-                      <span className="text-gray-800">{fmt.currency(m.sales)}</span>
+                      <span className="text-ink-muted">Sales</span>
+                      <span className="text-ink">{fmt.currency(m.sales)}</span>
                     </p>
                     <p className="flex justify-between">
-                      <span className="text-gray-500">ACOS</span>
+                      <span className="text-ink-muted">ACOS</span>
                       <span className={
-                        acos == null ? 'text-gray-400'
-                          : acos > 40 ? 'text-red-600'
-                          : acos > 25 ? 'text-yellow-700' : 'text-green-600'
+                        acos == null ? 'text-ink-subtle'
+                          : acos > 40 ? 'text-danger'
+                          : acos > 25 ? 'text-warn' : 'text-ok'
                       }>
                         {/* totals.acos is already a percentage from the API */}
                         {acos == null ? '—' : `${acos.toFixed(1)}%`}
                       </span>
                     </p>
                     <p className="flex justify-between">
-                      <span className="text-gray-500">Orders</span>
-                      <span className="text-gray-800">{m.orders}</span>
+                      <span className="text-ink-muted">Orders</span>
+                      <span className="text-ink">{m.orders}</span>
                     </p>
                     <p className="flex justify-between">
-                      <span className="text-gray-500">Clicks</span>
-                      <span className="text-gray-800">{m.clicks}</span>
+                      <span className="text-ink-muted">Clicks</span>
+                      <span className="text-ink">{m.clicks}</span>
                     </p>
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-2">{PLACEMENT_HELP[p]}</p>
+                  <p className="text-[11px] text-ink-subtle mt-2">{PLACEMENT_HELP[p]}</p>
                 </div>
               )
             })}
@@ -156,22 +156,22 @@ export default function PlacementsPage() {
           <div className="card p-0 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Campaign</th>
+                <tr className="border-b border-hairline bg-surface-sunken">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted">Campaign</th>
                   {present.map(p => (
-                    <th key={p} className="px-4 py-3 text-right text-xs font-semibold text-gray-600">
+                    <th key={p} className="px-4 py-3 text-right text-xs font-semibold text-ink-muted">
                       {PLACEMENT_LABEL[p] ?? p}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-hairline">
                 {data!.campaigns.map(row => (
-                  <tr key={row.campaign_id} className="hover:bg-gray-50">
+                  <tr key={row.campaign_id} className="hover:bg-surface-sunken">
                     <td className="px-4 py-3">
                       <button
                         onClick={() => router.push(`/campaigns/${row.campaign_id}`)}
-                        className="text-blue-600 hover:underline text-left truncate max-w-[240px] block"
+                        className="text-accent hover:underline text-left truncate max-w-[240px] block"
                         title={row.campaign_name}
                       >
                         {row.campaign_name}
@@ -179,15 +179,15 @@ export default function PlacementsPage() {
                     </td>
                     {present.map(p => {
                       const m: PlacementMetrics | undefined = row.placements[p]
-                      if (!m) return <td key={p} className="px-4 py-3 text-right text-gray-300">—</td>
+                      if (!m) return <td key={p} className="px-4 py-3 text-right text-ink-faint">—</td>
                       const pct = acosPct(m.acos)
                       return (
                         <td key={p} className="px-4 py-3 text-right">
-                          <span className="text-gray-900">{fmt.currency(m.spend)}</span>
+                          <span className="text-ink">{fmt.currency(m.spend)}</span>
                           <span className={`block text-xs ${
-                            pct == null ? 'text-gray-400'
-                              : pct > 40 ? 'text-red-600'
-                              : pct > 25 ? 'text-yellow-700' : 'text-green-600'
+                            pct == null ? 'text-ink-subtle'
+                              : pct > 40 ? 'text-danger'
+                              : pct > 25 ? 'text-warn' : 'text-ok'
                           }`}>
                             {pct == null ? 'no sales' : `${pct.toFixed(0)}% ACOS`}
                           </span>
@@ -200,7 +200,7 @@ export default function PlacementsPage() {
             </table>
           </div>
 
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-ink-subtle">
             Amazon lets you bid a percentage more for a placement. A spot with low
             ACOS and little spend is usually worth bidding up; the reverse is worth
             bidding down. Adjustments are applied through an approved suggestion,

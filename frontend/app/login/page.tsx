@@ -36,7 +36,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center -mt-6">
       <div className="card w-full max-w-sm">
-        <h2 className="text-xl font-bold text-gray-900 mb-6 text-center">Sign in to PPC OS</h2>
+        <h2 className="text-xl font-bold text-ink mb-6 text-center">Sign in to PPC OS</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="label">Email</label>
@@ -61,7 +61,7 @@ export default function LoginPage() {
             />
           </div>
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>
+            <p className="text-sm text-danger bg-danger-tint rounded px-3 py-2">{error}</p>
           )}
           <button type="submit" className="btn-primary w-full" disabled={submitting}>
             {submitting ? 'Signing in…' : 'Sign in'}

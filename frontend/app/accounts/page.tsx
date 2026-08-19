@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { api, ApiError } from '@/lib/api'
 import type { Account } from '@/lib/types'
+import { Notice } from '@/components/ui/Notice'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { DataTable, Column } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -14,15 +15,15 @@ import { ErrorState } from '@/components/ui/ErrorState'
 function ModeBadge({ mode }: { mode: 'mock' | 'real' | undefined }) {
   if (mode === 'real') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-        <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-ok-tint text-ok">
+        <span className="w-1.5 h-1.5 rounded-full bg-ok inline-block" />
         Real
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-      <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block" />
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-warn-tint text-warn">
+      <span className="w-1.5 h-1.5 rounded-full bg-warn inline-block" />
       Mock
     </span>
   )
@@ -55,31 +56,31 @@ function NewAccountForm({ onCreated, onCancel }: {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg mb-4">
+    <form onSubmit={handleSubmit} className="flex items-center gap-3 p-3 bg-accent-weak border border-accent-edge rounded-lg mb-4">
       <input
         autoFocus
         type="text"
         value={name}
         onChange={e => setName(e.target.value)}
         placeholder="Account name (e.g. My Amazon Store)"
-        className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="flex-1 px-3 py-1.5 border border-line rounded text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         disabled={saving}
       />
       <button
         type="submit"
         disabled={saving || !name.trim()}
-        className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+        className="px-4 py-1.5 bg-accent text-white text-sm rounded hover:bg-accent-hover disabled:opacity-50"
       >
         {saving ? 'Creating…' : 'Create Account'}
       </button>
       <button
         type="button"
         onClick={onCancel}
-        className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700"
+        className="px-3 py-1.5 text-sm text-ink-muted hover:text-ink"
       >
         Cancel
       </button>
-      {err && <span className="text-xs text-red-600">{err}</span>}
+      {err && <span className="text-xs text-danger">{err}</span>}
     </form>
   )
 }
@@ -136,14 +137,14 @@ export default function AccountsPage() {
       const result = await api.bootstrapDemoData()
       const r = result as Record<string, unknown>
       setBootstrapMsg(
-        `✅ Bootstrap complete — ${r.profiles_synced} profiles, ` +
+        `Bootstrap complete — ${r.profiles_synced} profiles, ` +
         `${r.campaigns_upserted} campaigns, ` +
         `${r.search_terms_synced} search terms, ` +
         `${r.suggestions_generated} suggestions`
       )
       await load()
     } catch (e) {
-      setBootstrapMsg(`❌ ${e instanceof ApiError ? e.message : 'Bootstrap failed'}`)
+      setBootstrapMsg(`${e instanceof ApiError ? e.message : 'Bootstrap failed'}`)
     } finally {
       setBootstrapping(false)
     }
@@ -163,7 +164,7 @@ export default function AccountsPage() {
   const columns: Column<Account>[] = [
     {
       header: 'Name',
-      cell: row => <span className="font-medium text-gray-900">{row.name}</span>,
+      cell: row => <span className="font-medium text-ink">{row.name}</span>,
       sortValue: row => row.name,
     },
     {
@@ -172,7 +173,7 @@ export default function AccountsPage() {
     },
     {
       header: 'Profiles',
-      cell: row => <span className="text-gray-600">{row.profile_count ?? 0}</span>,
+      cell: row => <span className="text-ink-muted">{row.profile_count ?? 0}</span>,
       sortValue: row => row.profile_count ?? 0,
     },
     {
@@ -186,7 +187,7 @@ export default function AccountsPage() {
     {
       header: 'Last Sync',
       cell: row => (
-        <span className="text-gray-500 text-xs">
+        <span className="text-ink-muted text-xs">
           {row.credential_status?.last_synced_at
             ? new Date(row.credential_status.last_synced_at).toLocaleString(undefined, {
                 dateStyle: 'short',
@@ -200,7 +201,7 @@ export default function AccountsPage() {
     {
       header: 'Created',
       cell: row => (
-        <span className="text-gray-500 text-xs">
+        <span className="text-ink-muted text-xs">
           {new Date(row.created_at).toLocaleDateString()}
         </span>
       ),
@@ -213,7 +214,7 @@ export default function AccountsPage() {
   return (
     <div>
       <PageHeader
-        title="Seller Accounts"
+        title="Accounts"
         subtitle={`${accounts.length} account${accounts.length !== 1 ? 's' : ''}`}
         actions={
           <button
@@ -227,10 +228,9 @@ export default function AccountsPage() {
 
       {/* OAuth error banner */}
       {oauthError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
-          <span className="text-red-800 text-sm">❌ Amazon connection failed: {oauthError}</span>
-          <button onClick={() => setOauthError(null)} className="text-red-400 hover:text-red-600 text-xs ml-4">✕</button>
-        </div>
+        <Notice tone="danger" className="mb-4" onDismiss={() => setOauthError(null)}>
+          Amazon connection failed: {oauthError}
+        </Notice>
       )}
 
       {/* New account inline form */}
@@ -248,26 +248,26 @@ export default function AccountsPage() {
       {/* Mode banner — only render after data loads to prevent flash */}
       {!dataLoading && (
         isRealMode ? (
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
-            <span className="text-green-800 text-sm font-medium">
-              🟢 Real Mode — connecting to live Amazon Ads API
+          <div className="mb-4 p-3 bg-ok-tint border border-ok/20 rounded-lg flex items-center gap-3">
+            <span className="text-ok text-sm font-medium">
+              Real mode — writing to the live Amazon Ads API is possible
             </span>
-            <span className="text-green-700 text-xs">
+            <span className="text-ok text-xs">
               AMAZON_MOCK_MODE=false · Open any account and click "Run Connection Test" to verify
             </span>
           </div>
         ) : (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-3">
-            <span className="text-yellow-800 text-sm font-medium">🛠 Mock Mode</span>
+          <div className="mb-4 p-3 bg-warn-tint border border-warn/20 rounded-lg flex items-center gap-3">
+            <span className="text-sm font-medium">Mock mode</span>
             <button
               onClick={handleBootstrap}
               disabled={bootstrapping}
-              className="px-3 py-1.5 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700 disabled:opacity-50"
+              className="px-3 py-1.5 bg-warn text-white text-sm rounded hover:bg-warn disabled:opacity-50"
             >
               {bootstrapping ? 'Bootstrapping…' : 'Bootstrap Demo Data'}
             </button>
             {bootstrapMsg && (
-              <span className="text-sm text-yellow-900">{bootstrapMsg}</span>
+              <span className="text-sm text-warn">{bootstrapMsg}</span>
             )}
           </div>
         )

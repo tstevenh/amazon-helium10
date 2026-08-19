@@ -17,11 +17,11 @@ import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 
 const STATUS_STYLE: Record<string, string> = {
-  success: 'bg-green-100 text-green-700',
-  partial: 'bg-yellow-100 text-yellow-800',
-  failed:  'bg-red-100 text-red-700',
-  running: 'bg-blue-100 text-blue-700',
-  queued:  'bg-gray-100 text-gray-600',
+  success: 'bg-ok-tint text-ok',
+  partial: 'bg-warn-tint text-warn',
+  failed:  'bg-danger-tint text-danger',
+  running: 'bg-info-tint text-accent',
+  queued:  'bg-surface-sunken text-ink-muted',
 }
 
 /** Plain-English cause, so a non-engineer can tell "our fault" from "Amazon's". */
@@ -125,12 +125,12 @@ export default function SyncMonitorPage() {
 
       {/* Headline: is the data current? Everything else is detail. */}
       <div className={`rounded-xl border p-4 ${
-        stats.isStale ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'
+        stats.isStale ? 'border-danger/20 bg-danger-tint' : 'border-ok/20 bg-ok-tint'
       }`}>
-        <p className={`text-sm font-semibold ${stats.isStale ? 'text-red-800' : 'text-green-800'}`}>
-          {stats.isStale ? '⚠ Data may be out of date' : '✓ Data is current'}
+        <p className={`text-sm font-semibold ${stats.isStale ? 'text-danger' : 'text-ok'}`}>
+          {stats.isStale ? 'Data may be out of date' : 'Data is current'}
         </p>
-        <p className={`text-sm mt-0.5 ${stats.isStale ? 'text-red-700' : 'text-green-700'}`}>
+        <p className={`text-sm mt-0.5 ${stats.isStale ? 'text-danger' : 'text-ok'}`}>
           {stats.hoursSince == null
             ? 'No sync has ever completed successfully.'
             : `Last successful sync ${stats.hoursSince < 1
@@ -141,18 +141,18 @@ export default function SyncMonitorPage() {
 
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: 'Succeeded (7d)', value: stats.success, cls: 'border-green-200 bg-white' },
-          { label: 'Partial (7d)',   value: stats.partial, cls: 'border-yellow-200 bg-white' },
-          { label: 'Failed (7d)',    value: stats.failed,  cls: 'border-red-200 bg-white' },
+          { label: 'Succeeded (7d)', value: stats.success, cls: 'border-ok/20 bg-surface' },
+          { label: 'Partial (7d)',   value: stats.partial, cls: 'border-warn/20 bg-surface' },
+          { label: 'Failed (7d)',    value: stats.failed,  cls: 'border-danger/20 bg-surface' },
         ].map(s => (
           <div key={s.label} className={`rounded-xl border p-4 ${s.cls}`}>
-            <p className="text-xs text-gray-500">{s.label}</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{s.value}</p>
+            <p className="text-xs text-ink-muted">{s.label}</p>
+            <p className="text-2xl font-bold text-ink mt-1">{s.value}</p>
           </div>
         ))}
       </div>
 
-      <p className="text-xs text-gray-500">
+      <p className="text-xs text-ink-muted">
         <span className="font-medium">Partial</span> means the sync ran but Amazon
         returned an incomplete picture — the data it did fetch was kept, and nothing
         was deleted.
@@ -161,52 +161,52 @@ export default function SyncMonitorPage() {
       <div className="card p-0 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-24">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-28">Type</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-40">Started</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 w-24">Duration</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 w-28">Records</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Result</th>
+            <tr className="border-b border-hairline bg-surface-sunken">
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-24">Status</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-28">Type</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-40">Started</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted w-24">Duration</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-ink-muted w-28">Records</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-ink-muted">Result</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-hairline">
             {loading && jobs.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-ink-subtle">Loading…</td></tr>
             ) : jobs.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-ink-subtle">
                 No syncs recorded yet. Run one from Settings → Accounts.
               </td></tr>
             ) : jobs.map(j => {
               const plain = explainError(j.error_message)
               return (
-                <tr key={j.id} className="hover:bg-gray-50 align-top">
+                <tr key={j.id} className="hover:bg-surface-sunken align-top">
                   <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${STATUS_STYLE[j.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${STATUS_STYLE[j.status] ?? 'bg-surface-sunken text-ink-muted'}`}>
                       {j.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 text-xs font-mono">{j.job_type}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs">{fmtTime(j.started_at ?? j.created_at)}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs">{fmtDuration(j.started_at, j.finished_at)}</td>
-                  <td className="px-4 py-3 text-right text-gray-800">
+                  <td className="px-4 py-3 text-ink-muted text-xs font-mono">{j.job_type}</td>
+                  <td className="px-4 py-3 text-ink-muted text-xs">{fmtTime(j.started_at ?? j.created_at)}</td>
+                  <td className="px-4 py-3 text-ink-muted text-xs">{fmtDuration(j.started_at, j.finished_at)}</td>
+                  <td className="px-4 py-3 text-right text-ink">
                     {j.records_synced ? j.records_synced.toLocaleString() : '—'}
                   </td>
                   <td className="px-4 py-3">
                     {j.error_message ? (
                       <>
-                        {plain && <p className="text-xs text-gray-800 mb-1">{plain}</p>}
+                        {plain && <p className="text-xs text-ink mb-1">{plain}</p>}
                         <details>
-                          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
+                          <summary className="text-xs text-ink-subtle cursor-pointer hover:text-ink-muted">
                             Technical detail
                           </summary>
-                          <p className="text-xs text-red-600 mt-1 font-mono break-all">{j.error_message}</p>
+                          <p className="text-xs text-danger mt-1 font-mono break-all">{j.error_message}</p>
                         </details>
                       </>
                     ) : j.status === 'running' ? (
-                      <span className="text-xs text-blue-600">In progress…</span>
+                      <span className="text-xs text-accent">In progress…</span>
                     ) : (
-                      <span className="text-xs text-gray-400">—</span>
+                      <span className="text-xs text-ink-subtle">—</span>
                     )}
                   </td>
                 </tr>

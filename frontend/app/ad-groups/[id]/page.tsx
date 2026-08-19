@@ -15,8 +15,8 @@ import { LoadingState } from '@/components/ui/LoadingState'
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="py-3 flex">
-      <dt className="w-40 text-sm font-medium text-gray-500 shrink-0">{label}</dt>
-      <dd className="text-sm text-gray-900">{value}</dd>
+      <dt className="w-40 text-sm font-medium text-ink-muted shrink-0">{label}</dt>
+      <dd className="text-sm text-ink">{value}</dd>
     </div>
   )
 }
@@ -70,24 +70,24 @@ function DateRangePicker({
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
+      <div className="flex rounded border border-hairline overflow-hidden text-xs">
         {presets.map(p => (
           <button
             key={p}
             onClick={() => { const d = datesForPreset(p); onChange(d.date_from, d.date_to) }}
-            className={`px-2.5 py-1.5 ${activePreset === p ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            className={`px-2.5 py-1.5 ${activePreset === p ? 'bg-accent text-white' : 'bg-surface text-ink-muted hover:bg-surface-sunken'}`}
           >
             {presetLabels[p]}
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-1 text-xs text-gray-500">
+      <div className="flex items-center gap-1 text-xs text-ink-muted">
         <input
           type="date"
           value={dateFrom}
           max={dateTo}
           onChange={e => onChange(e.target.value, dateTo)}
-          className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
+          className="border border-hairline rounded px-2 py-1 text-xs text-ink"
         />
         <span>–</span>
         <input
@@ -96,7 +96,7 @@ function DateRangePicker({
           min={dateFrom}
           max={isoDate(new Date())}
           onChange={e => onChange(dateFrom, e.target.value)}
-          className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
+          className="border border-hairline rounded px-2 py-1 text-xs text-ink"
         />
       </div>
     </div>
@@ -107,9 +107,9 @@ function DateRangePicker({
 
 function MetricTile({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="bg-gray-50 rounded-lg p-3 text-center">
-      <p className="text-[11px] text-gray-500 uppercase tracking-wide mb-0.5">{label}</p>
-      <p className={`text-sm font-semibold ${highlight ? 'text-blue-700' : 'text-gray-900'}`}>{value}</p>
+    <div className="bg-surface-sunken rounded-lg p-3 text-center">
+      <p className="text-[11px] text-ink-muted uppercase tracking-wide mb-0.5">{label}</p>
+      <p className={`text-sm font-semibold ${highlight ? 'text-accent' : 'text-ink'}`}>{value}</p>
     </div>
   )
 }
@@ -204,13 +204,13 @@ export default function AdGroupDetailPage() {
   const columns: Column<TargetWithMetrics>[] = [
     {
       header: 'Target',
-      cell: row => <span className="font-medium text-gray-900 text-xs">{row.expression_text || '—'}</span>,
+      cell: row => <span className="font-medium text-ink text-xs">{row.expression_text || '—'}</span>,
       sortValue: row => row.expression_text ?? '',
     },
     {
       header: 'Kind',
       cell: row => (
-        <span className="text-xs font-mono bg-gray-100 rounded px-2 py-0.5 capitalize">
+        <span className="text-xs font-mono bg-surface-sunken rounded px-2 py-0.5 capitalize">
           {row.target_kind}
         </span>
       ),
@@ -218,7 +218,7 @@ export default function AdGroupDetailPage() {
     },
     {
       header: 'Match',
-      cell: row => <span className="text-gray-600 text-xs capitalize">{row.match_type ?? '—'}</span>,
+      cell: row => <span className="text-ink-muted text-xs capitalize">{row.match_type ?? '—'}</span>,
     },
     {
       header: 'Status',
@@ -227,40 +227,40 @@ export default function AdGroupDetailPage() {
     },
     {
       header: 'Spend',
-      cell: row => <span className="text-gray-700 text-xs">{fmt.currency(row.spend)}</span>,
+      cell: row => <span className="text-ink text-xs">{fmt.currency(row.spend)}</span>,
       sortValue: row => row.spend ?? -1,
     },
     {
       header: 'Sales',
-      cell: row => <span className="text-gray-700 text-xs">{fmt.currency(row.sales)}</span>,
+      cell: row => <span className="text-ink text-xs">{fmt.currency(row.sales)}</span>,
       sortValue: row => row.sales ?? -1,
     },
     {
       header: 'ACOS',
       cell: row => {
         const acos = row.acos
-        const color = acos == null ? 'text-gray-400'
-          : acos > 40 ? 'text-red-600 font-medium'
-          : acos > 25 ? 'text-yellow-600 font-medium'
-          : 'text-green-600 font-medium'
+        const color = acos == null ? 'text-ink-subtle'
+          : acos > 40 ? 'text-danger font-medium'
+          : acos > 25 ? 'text-warn font-medium'
+          : 'text-ok font-medium'
         return <span className={`text-xs ${color}`}>{fmt.acos(acos)}</span>
       },
       sortValue: row => row.acos ?? 9999,
     },
     {
       header: 'ROAS',
-      cell: row => <span className="text-gray-700 text-xs">{fmt.roas(row.roas)}</span>,
+      cell: row => <span className="text-ink text-xs">{fmt.roas(row.roas)}</span>,
       sortValue: row => row.roas ?? -1,
     },
     {
       header: 'Clicks',
-      cell: row => <span className="text-gray-700 text-xs">{fmt.int(row.clicks)}</span>,
+      cell: row => <span className="text-ink text-xs">{fmt.int(row.clicks)}</span>,
       sortValue: row => row.clicks ?? -1,
     },
     {
       header: 'Bid',
       cell: row => (
-        <span className="text-gray-700 text-xs">
+        <span className="text-ink text-xs">
           {row.bid != null ? `$${Number(row.bid).toFixed(2)}` : '—'}
         </span>
       ),
@@ -272,7 +272,7 @@ export default function AdGroupDetailPage() {
     <div>
       <button
         onClick={() => router.back()}
-        className="text-sm text-blue-600 hover:underline mb-4 inline-block"
+        className="text-sm text-accent hover:underline mb-4 inline-block"
       >
         ← Back
       </button>
@@ -285,13 +285,13 @@ export default function AdGroupDetailPage() {
       {/* Performance card */}
       <div className="card mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-          <h2 className="text-sm font-semibold text-gray-700">Performance</h2>
+          <h2 className="text-sm font-semibold text-ink">Performance</h2>
           <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onChange={handleDateChange} />
         </div>
         {dataLoading ? (
-          <p className="text-xs text-gray-400 py-4 text-center">Loading metrics…</p>
+          <p className="text-xs text-ink-subtle py-4 text-center">Loading metrics…</p>
         ) : perfNoData ? (
-          <p className="text-xs text-gray-400 py-4 text-center">
+          <p className="text-xs text-ink-subtle py-4 text-center">
             No performance data for this range. Run Sync All from Campaign Manager first.
           </p>
         ) : perfSummary ? (
@@ -309,8 +309,8 @@ export default function AdGroupDetailPage() {
       </div>
 
       <div className="card mb-6">
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">Ad Group Details</h2>
-        <dl className="divide-y divide-gray-100">
+        <h2 className="text-sm font-semibold text-ink mb-2">Ad Group Details</h2>
+        <dl className="divide-y divide-hairline">
           <DetailRow label="Status" value={<StatusBadge status={adGroup.status} />} />
           <DetailRow
             label="Default Bid"
@@ -321,7 +321,7 @@ export default function AdGroupDetailPage() {
 
       <div className="card">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-4">
-          <h2 className="text-sm font-semibold text-gray-700 shrink-0">
+          <h2 className="text-sm font-semibold text-ink shrink-0">
             Targets ({filtered.length}{search || kindFilter !== 'all' || statusFilter !== 'all' ? ` of ${targets.length}` : ''})
           </h2>
           <div className="flex gap-2 flex-1 w-full sm:w-auto">

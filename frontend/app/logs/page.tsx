@@ -27,9 +27,9 @@ const SOURCE_LABEL: Record<string, string> = {
 }
 
 const SOURCE_STYLE: Record<string, string> = {
-  suggestion_execution: 'bg-blue-100 text-blue-700',
-  manual_edit: 'bg-gray-100 text-gray-700',
-  rollback: 'bg-amber-100 text-amber-700',
+  suggestion_execution: 'bg-info-tint text-accent',
+  manual_edit: 'bg-surface-sunken text-ink',
+  rollback: 'bg-warn-tint text-warn',
 }
 
 function fmtWhen(iso: string | null): string {
@@ -89,18 +89,18 @@ export default function LogsPage() {
   const columns: Column<ChangeLogEntry>[] = [
     {
       header: 'When',
-      cell: r => <span className="text-gray-600 text-xs">{fmtWhen(r.changed_at)}</span>,
+      cell: r => <span className="text-ink-muted text-xs">{fmtWhen(r.changed_at)}</span>,
       sortValue: r => r.changed_at ?? '',
     },
     {
       header: 'Marketplace',
-      cell: r => <span className="text-gray-600">{marketplaceOf(r.profile_id)}</span>,
+      cell: r => <span className="text-ink-muted">{marketplaceOf(r.profile_id)}</span>,
     },
     {
       header: 'What',
       cell: r => (
-        <span className="text-gray-900">
-          {r.entity_type} <span className="text-gray-400">·</span> {r.field_changed}
+        <span className="text-ink">
+          {r.entity_type} <span className="text-ink-subtle">·</span> {r.field_changed}
         </span>
       ),
     },
@@ -108,16 +108,16 @@ export default function LogsPage() {
       header: 'Change',
       cell: r => (
         <span className="font-mono text-sm">
-          <span className="text-gray-500 line-through">{r.old_value ?? '—'}</span>
-          <span className="mx-1.5 text-gray-400">→</span>
-          <span className="text-gray-900 font-medium">{r.new_value ?? '—'}</span>
+          <span className="text-ink-muted line-through">{r.old_value ?? '—'}</span>
+          <span className="mx-1.5 text-ink-subtle">→</span>
+          <span className="text-ink font-medium">{r.new_value ?? '—'}</span>
         </span>
       ),
     },
     {
       header: 'Source',
       cell: r => (
-        <span className={`px-2 py-0.5 rounded text-xs ${SOURCE_STYLE[r.source] ?? 'bg-gray-100 text-gray-700'}`}>
+        <span className={`px-2 py-0.5 rounded text-xs ${SOURCE_STYLE[r.source] ?? 'bg-surface-sunken text-ink'}`}>
           {SOURCE_LABEL[r.source] ?? r.source}
         </span>
       ),
@@ -125,27 +125,27 @@ export default function LogsPage() {
     },
     {
       header: 'Amazon ID',
-      cell: r => <span className="text-gray-400 text-xs font-mono">{r.amazon_entity_id ?? '—'}</span>,
+      cell: r => <span className="text-ink-subtle text-xs font-mono">{r.amazon_entity_id ?? '—'}</span>,
     },
     {
       header: '',
       cell: r => {
         if (r.rolled_back_at) {
           return (
-            <span className="text-xs text-gray-400" title={fmtWhen(r.rolled_back_at)}>
+            <span className="text-xs text-ink-subtle" title={fmtWhen(r.rolled_back_at)}>
               undone
             </span>
           )
         }
         if (r.source === 'rollback') {
           // Undoing an undo would oscillate the value; the backend refuses it.
-          return <span className="text-xs text-gray-300">—</span>
+          return <span className="text-xs text-ink-faint">—</span>
         }
         return (
           <button
             onClick={() => handleUndo(r)}
             disabled={busyId === r.id}
-            className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+            className="text-xs px-2 py-1 rounded border border-line hover:bg-surface-sunken disabled:opacity-50"
           >
             {busyId === r.id ? 'Undoing…' : 'Undo'}
           </button>
@@ -159,20 +159,20 @@ export default function LogsPage() {
   return (
     <div className="p-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Logs</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-xl font-semibold tracking-tight text-ink">Change Log</h1>
+        <p className="text-sm text-ink-muted mt-1">
           {rows.length} change{rows.length === 1 ? '' : 's'} written to Amazon
           {currentProfileId ? '' : ' across all marketplaces'}
         </p>
       </div>
 
       {toast && (
-        <div className="mb-4 px-4 py-2 rounded bg-gray-100 text-sm text-gray-800">
+        <div className="mb-4 px-4 py-2 rounded bg-surface-sunken text-sm text-ink">
           {toast}
         </div>
       )}
 
-      <div className="bg-white rounded-lg border border-gray-200">
+      <div className="bg-surface rounded-lg border border-hairline">
         <DataTable
           columns={columns}
           rows={rows}

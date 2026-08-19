@@ -126,7 +126,7 @@ export function useColumnWidths(storageKey: string, columnCount: number) {
       aria-label="Resize column"
       title="Drag to resize"
       className="absolute top-0 right-0 h-full w-2 cursor-col-resize select-none
-                 hover:bg-blue-300/60 active:bg-blue-400/70"
+                 hover:bg-accent-edge/60 active:bg-accent/70"
     />
   )
 
