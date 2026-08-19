@@ -188,6 +188,7 @@ export default function AdGroupsPage() {
           defaultSortDir="desc"
           rowKey={r => r.id}
           onRowClick={r => router.push(`/ad-groups/${r.id}`)}
+          rowHref={r => `/ad-groups/${r.id}`}
           loading={isLoading}
           emptyTitle="No ad groups found"
           emptyDescription={

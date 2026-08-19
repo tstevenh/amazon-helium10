@@ -313,6 +313,7 @@ export default function CampaignDetailPage() {
           rows={filteredAdGroups}
           rowKey={r => r.id}
           onRowClick={r => router.push(`/ad-groups/${r.id}`)}
+          rowHref={r => `/ad-groups/${r.id}`}
           emptyTitle="No ad groups"
           emptyDescription={search ? 'No ad groups match your search.' : 'No ad groups found for this campaign.'}
         />

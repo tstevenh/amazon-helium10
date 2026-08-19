@@ -1,5 +1,6 @@
 'use client'
 import { useState, useMemo } from 'react'
+import Link from 'next/link'
 import { Pagination } from './Pagination'
 import { LoadingState } from './LoadingState'
 import { EmptyState } from './EmptyState'
@@ -24,6 +25,22 @@ interface DataTableProps<T> {
   rows: T[]
   rowKey: (row: T) => string
   onRowClick?: (row: T) => void
+  /**
+   * Destination for this row. When given, the FIRST column is rendered as a
+   * real <a href>, so right-click -> "Open in new tab" and cmd/ctrl-click
+   * work. onRowClick alone cannot do that: a click handler on <tr> is
+   * invisible to the browser's link affordances, and a PPC manager comparing
+   * several campaigns has to navigate back and forth instead of opening tabs.
+   */
+  rowHref?: (row: T) => string
+  /**
+   * Controlled sort. Supply all three to lift sort state out of this
+   * component — the campaigns screen keeps it in the URL so Back restores it.
+   * Omit them and the table manages its own sort as before.
+   */
+  sortCol?: number | null
+  sortDir?: SortDir
+  onSortChange?: (col: number | null, dir: SortDir) => void
   pageSize?: number
   loading?: boolean
   emptyTitle?: string
@@ -38,6 +55,10 @@ export function DataTable<T>({
   rows,
   rowKey,
   onRowClick,
+  rowHref,
+  sortCol: sortColProp,
+  sortDir: sortDirProp,
+  onSortChange,
   pageSize = 25,
   loading = false,
   emptyTitle = 'No records found',
@@ -46,8 +67,12 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   // Default sort matters: an operator opening a table should see the rows
   // that need attention, not whatever order the API happened to return.
-  const [sortCol, setSortCol] = useState<number | null>(defaultSortCol ?? null)
-  const [sortDir, setSortDir] = useState<SortDir>(defaultSortDir ?? 'asc')
+  const [ownSortCol, setOwnSortCol] = useState<number | null>(defaultSortCol ?? null)
+  const [ownSortDir, setOwnSortDir] = useState<SortDir>(defaultSortDir ?? 'asc')
+  // Controlled when the parent passes a handler; otherwise self-managed.
+  const controlled = onSortChange !== undefined
+  const sortCol = controlled ? (sortColProp ?? null) : ownSortCol
+  const sortDir = controlled ? (sortDirProp ?? 'asc') : ownSortDir
   const [page, setPage] = useState(1)
 
   const sorted = useMemo(() => {
@@ -89,11 +114,15 @@ export function DataTable<T>({
 
   const toggleSort = (idx: number) => {
     if (!columns[idx]?.sortValue) return
-    if (sortCol === idx) {
-      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    const [nextCol, nextDir]: [number, SortDir] =
+      sortCol === idx
+        ? [idx, sortDir === 'asc' ? 'desc' : 'asc']
+        : [idx, 'asc']
+    if (controlled) {
+      onSortChange!(nextCol, nextDir)
     } else {
-      setSortCol(idx)
-      setSortDir('asc')
+      setOwnSortCol(nextCol)
+      setOwnSortDir(nextDir)
     }
   }
 
@@ -136,12 +165,24 @@ export function DataTable<T>({
                 key={rowKey(row)}
                 onClick={() => onRowClick?.(row)}
                 className={`transition-colors ${
-                  onRowClick ? 'cursor-pointer hover:bg-blue-50' : ''
+                  onRowClick || rowHref ? 'cursor-pointer hover:bg-blue-50' : ''
                 }`}
               >
                 {columns.map((col, i) => (
                   <td key={i} className={`px-4 py-3 ${col.className ?? ''}`}>
-                    {col.cell(row)}
+                    {i === 0 && rowHref ? (
+                      // stopPropagation so the anchor does not also fire the
+                      // row handler, which would navigate twice.
+                      <Link
+                        href={rowHref(row)}
+                        onClick={e => e.stopPropagation()}
+                        className="text-blue-700 hover:underline"
+                      >
+                        {col.cell(row)}
+                      </Link>
+                    ) : (
+                      col.cell(row)
+                    )}
                   </td>
                 ))}
               </tr>

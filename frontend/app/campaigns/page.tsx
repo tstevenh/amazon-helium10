@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { useUrlState } from '@/lib/useUrlState'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
 import type { CampaignWithMetrics, Profile } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { DataTable, Column } from '@/components/ui/DataTable'
+import { DataTable, Column, SortDir } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SearchBox } from '@/components/ui/SearchBox'
 import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
@@ -42,6 +43,21 @@ const fmt = {
 
 // ── Main page ─────────────────────────────────────────────────────────────
 
+// Declared at module scope on purpose. useUrlState memoises on this object's
+// identity, so a literal built inside the component would be a new object every
+// render and defeat the memo. `sort` holds a column HEADER rather than an index
+// so reordering columns cannot silently change what a saved link sorts by, and
+// empty date_from/date_to mean "the 30-day default", resolved at render time.
+const CAMPAIGN_FILTER_DEFAULTS = {
+  search: '',
+  status: 'all',
+  ad_product: 'all',
+  date_from: '',
+  date_to: '',
+  sort: 'Spend',
+  dir: 'desc',
+}
+
 export default function CampaignsPage() {
   const { user, loading: authLoading } = useAuth()
   const {
@@ -50,15 +66,27 @@ export default function CampaignsPage() {
   const router = useRouter()
 
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([])
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [adProductFilter, setAdProductFilter] = useState('all')
+  // Filters, date range and sort live in the URL, not in useState. Pressing
+  // Back from a campaign used to remount this screen with its defaults, so
+  // "7 days sorted by clicks" silently reverted to "30 days sorted by spend".
+  // Defaults are declared once, outside render, so the object identity is
+  // stable and useUrlState's memo does not invalidate on every render.
+  const [urlState, setUrlState] = useUrlState(CAMPAIGN_FILTER_DEFAULTS)
+  const { search, status: statusFilter, ad_product: adProductFilter } = urlState
+  const setSearch = (v: string) => setUrlState({ search: v })
+  const setStatusFilter = (v: string) => setUrlState({ status: v })
+  const setAdProductFilter = (v: string) => setUrlState({ ad_product: v })
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Shared date range state
-  const [dateFrom, setDateFrom] = useState(datesForPreset('30d').date_from)
-  const [dateTo, setDateTo] = useState(datesForPreset('30d').date_to)
+  // Shared date range, also from the URL. An empty value means "the 30-day
+  // default", resolved here rather than stored, so the URL stays clean and a
+  // pasted link keeps meaning "last 30 days" tomorrow instead of freezing
+  // today's dates.
+  const dateFrom = urlState.date_from || datesForPreset('30d').date_from
+  const dateTo = urlState.date_to || datesForPreset('30d').date_to
+  const setDateRange = (from: string, to: string) =>
+    setUrlState({ date_from: from, date_to: to })
 
   const activePreset = useMemo((): Preset | null => {
     for (const p of ['7d', '14d', '30d', '90d'] as Preset[]) {
@@ -237,6 +265,19 @@ export default function CampaignsPage() {
     },
   ]
 
+  // Sort is stored as a column header in the URL; map it back to an index.
+  // An unknown header (a saved link from an older column set) falls back to
+  // the default rather than rendering an unsorted table.
+  // Deliberately NOT useMemo. This sits after the early returns above
+  // (authLoading / !user / error), so a hook here runs on some renders and not
+  // others — React counts hooks by position and crashed the whole screen with
+  // "Rendered more hooks than during the previous render". A findIndex over a
+  // dozen columns costs nothing; a conditional hook costs the page.
+  const sortColFound = columns.findIndex(c => c.header === urlState.sort)
+  const sortCol =
+    sortColFound >= 0 ? sortColFound : columns.findIndex(c => c.header === 'Spend')
+  const sortDir: SortDir = urlState.dir === 'asc' ? 'asc' : 'desc'
+
   const isLoading = dataLoading || profilesLoading
   const presets: Preset[] = ['7d', '14d', '30d', '90d']
   const presetLabels: Record<Preset, string> = { '7d': '7D', '14d': '14D', '30d': '30D', '90d': '90D' }
@@ -258,7 +299,7 @@ export default function CampaignsPage() {
           {presets.map(p => (
             <button
               key={p}
-              onClick={() => { const d = datesForPreset(p); setDateFrom(d.date_from); setDateTo(d.date_to) }}
+              onClick={() => { const d = datesForPreset(p); setDateRange(d.date_from, d.date_to) }}
               className={`px-3 py-1.5 whitespace-nowrap transition-colors ${
                 activePreset === p ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
               }`}
@@ -272,7 +313,7 @@ export default function CampaignsPage() {
             type="date"
             value={dateFrom}
             max={dateTo}
-            onChange={e => setDateFrom(e.target.value)}
+            onChange={e => setDateRange(e.target.value, dateTo)}
             className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
           />
           <span className="text-xs text-gray-400">–</span>
@@ -281,7 +322,7 @@ export default function CampaignsPage() {
             value={dateTo}
             min={dateFrom}
             max={isoDate(new Date())}
-            onChange={e => setDateTo(e.target.value)}
+            onChange={e => setDateRange(dateFrom, e.target.value)}
             className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
           />
         </div>
@@ -319,12 +360,16 @@ export default function CampaignsPage() {
           // Open on highest spend: a PPC operator wants the campaigns
           // costing money first, not paused ones with no data. Computed
           // from the header so reordering columns cannot break it.
-          defaultSortCol={columns.findIndex(c => c.header === 'Spend')}
-          defaultSortDir="desc"
+          sortCol={sortCol}
+          sortDir={sortDir}
+          onSortChange={(col, dir) =>
+            setUrlState({ sort: col === null ? '' : columns[col].header, dir })
+          }
           columns={columns}
           rows={filtered}
           rowKey={r => r.id}
           onRowClick={r => router.push(`/campaigns/${r.id}`)}
+          rowHref={r => `/campaigns/${r.id}`}
           loading={isLoading}
           emptyTitle="No campaigns found"
           emptyDescription={

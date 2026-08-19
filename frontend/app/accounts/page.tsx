@@ -282,6 +282,7 @@ export default function AccountsPage() {
           rows={filtered}
           rowKey={r => r.id}
           onRowClick={r => router.push(`/accounts/${r.id}`)}
+          rowHref={r => `/accounts/${r.id}`}
           loading={dataLoading}
           emptyTitle="No accounts"
           emptyDescription={
