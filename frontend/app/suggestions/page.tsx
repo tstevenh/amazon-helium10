@@ -2,6 +2,12 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUrlState } from '@/lib/useUrlState'
+import { AlertTriangle, CheckCircle2, Info, Settings2 } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
+import { Drawer } from '@/components/ui/Drawer'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Input, Select } from '@/components/ui/Field'
+import { StatBar } from '@/components/ui/StatBar'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
@@ -39,36 +45,49 @@ const TYPE_LABELS: Record<string, string> = {
   placement_increase: 'Placement ↑',
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  negative_exact:  'bg-red-100 text-red-700',
-  negative_phrase: 'bg-orange-100 text-orange-700',
-  keyword_exact:   'bg-green-100 text-green-700',
-  keyword_phrase:  'bg-emerald-100 text-emerald-700',
-  keyword_broad:   'bg-teal-100 text-teal-700',
-  bid_decrease:    'bg-purple-100 text-purple-700',
-  bid_increase:    'bg-blue-100 text-blue-700',
-  budget_decrease: 'bg-blue-100 text-blue-800',
-  budget_increase: 'bg-cyan-100 text-cyan-800',
-  placement_decrease: 'bg-teal-100 text-teal-800',
-  placement_increase: 'bg-teal-100 text-teal-700',
+/**
+ * Tone by what the suggestion DOES, not by which of eleven types it is.
+ *
+ * This replaced eight pastel hues — red, orange, green, emerald, teal, purple,
+ * blue, cyan — one per type. The label already spells the type out ("Neg Exact",
+ * "Bid ↓"), so the colour carried no information, and with eight hues in one
+ * column none of them could mean anything.
+ *
+ * Three tones that a reader can actually learn: something is being blocked,
+ * something is being added, or a number is being adjusted.
+ */
+const TYPE_TONE: Record<string, 'danger' | 'ok' | 'neutral'> = {
+  negative_exact:  'danger',
+  negative_phrase: 'danger',
+  keyword_exact:   'ok',
+  keyword_phrase:  'ok',
+  keyword_broad:   'ok',
+  bid_decrease:    'neutral',
+  bid_increase:    'neutral',
+  budget_decrease: 'neutral',
+  budget_increase: 'neutral',
+  placement_decrease: 'neutral',
+  placement_increase: 'neutral',
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  pending:  'bg-yellow-100 text-yellow-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-gray-100 text-gray-500',
+const STATUS_TONE: Record<string, 'warn' | 'ok' | 'neutral'> = {
+  pending:  'warn',
+  approved: 'ok',
+  rejected: 'neutral',
 }
 
-function confidenceBadge(score: number): string {
-  if (score >= 80) return 'bg-emerald-100 text-emerald-700 font-semibold'
-  if (score >= 50) return 'bg-yellow-100 text-yellow-700'
-  return 'bg-gray-100 text-gray-500'
+/** Confidence is the one number here whose direction is genuinely good or bad,
+ *  so it is the one that earns a tone. */
+function confidenceTone(score: number): 'ok' | 'warn' | 'neutral' {
+  if (score >= 80) return 'ok'
+  if (score >= 50) return 'warn'
+  return 'neutral'
 }
 
 function confidenceBar(score: number): string {
-  if (score >= 80) return 'bg-emerald-500'
-  if (score >= 50) return 'bg-yellow-400'
-  return 'bg-gray-300'
+  if (score >= 80) return 'bg-ok'
+  if (score >= 50) return 'bg-warn'
+  return 'bg-ink-faint'
 }
 
 type SortBy = 'newest' | 'confidence' | 'spend' | 'sales'
@@ -78,49 +97,37 @@ type ConfidenceRange = 'all' | 'low' | 'med' | 'high'
 
 function DetailDrawer({ s, onClose }: { s: Suggestion; onClose: () => void }) {
   const snap = s.metrics_snapshot
-  // Close on Escape
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
-
+  // Escape, the focus trap, focus restoration and the scroll lock all come from
+  // Radix now. The hand-rolled version handled only Escape: Tab walked out of
+  // the panel into the table behind it, focus never returned to the row that
+  // opened it, and nothing announced the panel to a screen reader — in a panel
+  // that carries an Execute button.
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      {/* Panel */}
-      <div className="relative w-full max-w-md bg-white shadow-xl flex flex-col overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
-          <div className="flex-1 min-w-0 pr-3">
-            <p className="text-xs text-gray-400 mb-1">Search Term</p>
-            <h2 className="text-base font-semibold text-gray-900 break-words">{s.search_term}</h2>
-          </div>
-          <button onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 flex-shrink-0 text-xl leading-none mt-0.5">×</button>
-        </div>
-
+    <Drawer
+      open
+      onOpenChange={open => { if (!open) onClose() }}
+      subtitle="Search term"
+      title={s.search_term}
+    >
+      <div>
         {/* Badges row */}
-        <div className="flex flex-wrap gap-2 px-5 py-3 border-b border-gray-100">
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${TYPE_COLORS[s.suggestion_type] ?? 'bg-gray-100 text-gray-600'}`}>
+        <div className="flex flex-wrap gap-2 border-b border-hairline px-4 py-3">
+          <Badge tone={TYPE_TONE[s.suggestion_type] ?? 'neutral'}>
             {TYPE_LABELS[s.suggestion_type] ?? s.suggestion_type}
-          </span>
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[s.status] ?? ''}`}>
-            {s.status}
-          </span>
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${confidenceBadge(s.confidence_score ?? 0)}`}>
+          </Badge>
+          <Badge tone={STATUS_TONE[s.status] ?? 'neutral'}>{s.status}</Badge>
+          <Badge tone={confidenceTone(s.confidence_score ?? 0)}>
             Confidence {s.confidence_score ?? 0}
-          </span>
+          </Badge>
         </div>
 
         {/* Confidence bar */}
-        <div className="px-5 py-3 border-b border-gray-100">
-          <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+        <div className="px-5 py-3 border-b border-hairline">
+          <div className="flex items-center justify-between text-xs text-ink-muted mb-1.5">
             <span>Confidence Score</span>
-            <span className="font-semibold text-gray-700">{s.confidence_score ?? 0} / 100</span>
+            <span className="font-semibold text-ink">{s.confidence_score ?? 0} / 100</span>
           </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div className="h-2 bg-surface-sunken rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all ${confidenceBar(s.confidence_score ?? 0)}`}
               style={{ width: `${s.confidence_score ?? 0}%` }}
@@ -129,42 +136,42 @@ function DetailDrawer({ s, onClose }: { s: Suggestion; onClose: () => void }) {
         </div>
 
         {/* Reason */}
-        <div className="px-5 py-3 border-b border-gray-100">
-          <p className="text-xs text-gray-400 mb-1">Reason</p>
-          <p className="text-sm text-gray-700">{s.reason}</p>
+        <div className="px-5 py-3 border-b border-hairline">
+          <p className="text-xs text-ink-subtle mb-1">Reason</p>
+          <p className="text-sm text-ink">{s.reason}</p>
         </div>
 
         {/* Source — shown for rule-generated suggestions */}
         {s.source_type === 'rule' && s.source_rule_name && (
-          <div className="px-5 py-3 border-b border-gray-100">
-            <p className="text-xs text-gray-400 mb-1">Source</p>
+          <div className="px-5 py-3 border-b border-hairline">
+            <p className="text-xs text-ink-subtle mb-1">Source</p>
             <div className="flex items-center gap-2">
-              <span className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-medium">
-                ⚙️ Rule
-              </span>
-              <p className="text-sm text-gray-700">{s.source_rule_name}</p>
+              <Badge tone="accent">
+                <Settings2 size={12} aria-hidden /> Rule
+              </Badge>
+              <p className="text-sm text-ink">{s.source_rule_name}</p>
             </div>
           </div>
         )}
 
         {/* Coverage */}
-        <div className="px-5 py-3 border-b border-gray-100">
-          <p className="text-xs text-gray-400 mb-2">Coverage</p>
+        <div className="px-5 py-3 border-b border-hairline">
+          <p className="text-xs text-ink-subtle mb-2">Coverage</p>
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500">Campaigns Affected</p>
-              <p className="text-lg font-semibold text-gray-900 mt-0.5">{s.campaign_count ?? 1}</p>
+            <div className="bg-surface-sunken rounded-lg p-3">
+              <p className="text-xs text-ink-muted">Campaigns Affected</p>
+              <p className="text-lg font-semibold text-ink mt-0.5">{s.campaign_count ?? 1}</p>
             </div>
-            <div className="bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500">Ad Groups Affected</p>
-              <p className="text-lg font-semibold text-gray-900 mt-0.5">{s.ad_group_count ?? 1}</p>
+            <div className="bg-surface-sunken rounded-lg p-3">
+              <p className="text-xs text-ink-muted">Ad Groups Affected</p>
+              <p className="text-lg font-semibold text-ink mt-0.5">{s.ad_group_count ?? 1}</p>
             </div>
           </div>
         </div>
 
         {/* Aggregated metrics */}
-        <div className="px-5 py-3 border-b border-gray-100">
-          <p className="text-xs text-gray-400 mb-2">Aggregated Metrics (30 days)</p>
+        <div className="px-5 py-3 border-b border-hairline">
+          <p className="text-xs text-ink-subtle mb-2">Aggregated Metrics (30 days)</p>
           <div className="grid grid-cols-3 gap-2">
             {[
               { label: 'Total Spend', value: fmtCurrency(s.total_spend) },
@@ -177,9 +184,9 @@ function DetailDrawer({ s, onClose }: { s: Suggestion; onClose: () => void }) {
               { label: 'CVR', value: fmtPct(snap.conversion_rate) },
               { label: 'CPC', value: snap.clicks ? fmtCurrency(String(parseFloat(String(snap.cost ?? 0)) / Math.max(snap.clicks, 1))) : '—' },
             ].map(({ label, value }) => (
-              <div key={label} className="bg-gray-50 rounded-lg p-2.5">
-                <p className="text-xs text-gray-400">{label}</p>
-                <p className="text-sm font-medium text-gray-800 mt-0.5 truncate">{value}</p>
+              <div key={label} className="bg-surface-sunken rounded-lg p-2.5">
+                <p className="text-xs text-ink-subtle">{label}</p>
+                <p className="text-sm font-medium text-ink mt-0.5 truncate">{value}</p>
               </div>
             ))}
           </div>
@@ -187,22 +194,22 @@ function DetailDrawer({ s, onClose }: { s: Suggestion; onClose: () => void }) {
 
         {/* Timeline */}
         <div className="px-5 py-3">
-          <p className="text-xs text-gray-400 mb-2">Timeline</p>
+          <p className="text-xs text-ink-subtle mb-2">Timeline</p>
           <div className="space-y-1.5 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-500">Created</span>
-              <span className="text-gray-700">{fmtDate(s.created_at)}</span>
+              <span className="text-ink-muted">Created</span>
+              <span className="text-ink">{fmtDate(s.created_at)}</span>
             </div>
             {s.resolved_at && (
               <div className="flex justify-between">
-                <span className="text-gray-500 capitalize">{s.status}</span>
-                <span className="text-gray-700">{fmtDate(s.resolved_at)}</span>
+                <span className="text-ink-muted capitalize">{s.status}</span>
+                <span className="text-ink">{fmtDate(s.resolved_at)}</span>
               </div>
             )}
           </div>
         </div>
       </div>
-    </div>
+    </Drawer>
   )
 }
 
@@ -219,24 +226,23 @@ function SummaryCards({ suggestions }: { suggestions: Suggestion[] }) {
 
   const harvestOpps = suggestions.filter(s => s.kind === 'harvest' && s.status === 'pending').length
 
-  const cards = [
-    { label: 'Pending',               value: String(pending),               sub: 'awaiting review',       color: 'border-yellow-300 bg-yellow-50' },
-    { label: 'Approved',              value: String(approved),              sub: 'actioned',               color: 'border-green-300 bg-green-50' },
-    { label: 'Rejected',              value: String(rejected),              sub: 'dismissed',              color: 'border-gray-300 bg-gray-50' },
-    { label: 'Potential Savings',     value: fmtCurrency(String(spendSavings)), sub: 'from pending negatives', color: 'border-red-300 bg-red-50' },
-    { label: 'Harvest Opportunities', value: String(harvestOpps),           sub: 'pending keywords',       color: 'border-blue-300 bg-blue-50' },
-  ]
-
+  // One strip, not five pastel boxes. Each card previously had its own tinted
+  // background AND coloured border, so the summary read as five competing
+  // objects above the queue that is the actual work.
+  //
+  // Only the money figure carries a tone: it is the number that changes what
+  // someone does next. Counts are counts.
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      {cards.map(({ label, value, sub, color }) => (
-        <div key={label} className={`rounded-xl border p-3.5 ${color}`}>
-          <p className="text-xs text-gray-500 truncate">{label}</p>
-          <p className="text-xl font-bold text-gray-900 mt-1 truncate">{value}</p>
-          <p className="text-xs text-gray-400 mt-0.5 truncate">{sub}</p>
-        </div>
-      ))}
-    </div>
+    <StatBar
+      stats={[
+        { label: 'Pending',   value: pending,  hint: 'to review' },
+        { label: 'Approved',  value: approved, hint: 'actioned' },
+        { label: 'Rejected',  value: rejected, hint: 'dismissed' },
+        { label: 'Wasted spend', value: fmtCurrency(String(spendSavings)),
+          hint: 'pending negatives', tone: spendSavings > 0 ? 'danger' : undefined },
+        { label: 'Harvest', value: harvestOpps, hint: 'pending keywords' },
+      ]}
+    />
   )
 }
 
@@ -527,8 +533,8 @@ export default function SuggestionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Suggestion Inbox</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="text-2xl font-bold text-ink">Suggestion Inbox</h1>
+          <p className="text-sm text-ink-muted mt-0.5">
             {/* Not AI: every suggestion comes from a threshold rule you can read
                 and edit on the Rules page. Saying "AI" would hide that. */}
             Negative, harvest &amp; bid suggestions from your rule thresholds — nothing
@@ -540,7 +546,7 @@ export default function SuggestionsPage() {
           disabled={generating || !profileIds.length}
           className="btn-secondary"
         >
-          {generating ? 'Generating…' : '⚡ Generate Suggestions'}
+          {generating ? 'Generating…' : 'Generate suggestions'}
         </button>
       </div>
 
@@ -551,102 +557,118 @@ export default function SuggestionsPage() {
 
       {/* Status messages */}
       {genMsg && (
-        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">
+        <div className="flex items-center gap-2 rounded-lg border border-ok/20 bg-ok-tint px-3 py-2 text-sm text-ok">
+          <CheckCircle2 size={15} className="shrink-0" aria-hidden />
           {genMsg}
         </div>
       )}
       {bulkMsg && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-700">
+        <div className="flex items-center gap-2 rounded-lg border border-info/20 bg-info-tint px-3 py-2 text-sm text-info">
+          <Info size={15} className="shrink-0" aria-hidden />
           {bulkMsg}
         </div>
       )}
       {actionError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-sm text-red-700">
+        <div className="flex items-center gap-2 rounded-lg border border-danger/20 bg-danger-tint px-3 py-2 text-sm text-danger">
+          <AlertTriangle size={15} className="shrink-0" aria-hidden />
           {actionError}
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters.
+          Two segmented controls, on their own line, with labels. Previously they
+          were two bordered button groups sitting flush against each other, so
+          the row read "All Pending Approved Rejected All Negative Harvest…" —
+          two adjacent buttons both saying "All", each meaning something
+          different. The Select controls were also full-width `.input`, which
+          stretched a four-option dropdown across the screen. */}
       {!noContext && !noProfiles && (
-        <div className="flex flex-wrap gap-2 items-center">
-          {/* Status */}
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-            {(['all', 'pending', 'approved', 'rejected'] as const).map(t => (
-              <button key={t} onClick={() => setStatusTab(t)}
-                className={`px-3 py-2 capitalize transition-colors ${
-                  statusTab === t ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}>
-                {t}{t === 'pending' ? ` (${suggestions.filter(s => s.status === 'pending').length})` : ''}
-              </button>
-            ))}
+        <div className="mb-4 space-y-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-ink-subtle">Status</span>
+              <SegmentedControl
+                ariaLabel="Filter by status"
+                value={statusTab}
+                onChange={setStatusTab}
+                options={(['all', 'pending', 'approved', 'rejected'] as const).map(t => ({
+                  value: t,
+                  label: t === 'pending'
+                    ? `Pending (${suggestions.filter(x => x.status === 'pending').length})`
+                    : t.charAt(0).toUpperCase() + t.slice(1),
+                }))}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-ink-subtle">Type</span>
+              <SegmentedControl
+                ariaLabel="Filter by suggestion type"
+                value={kindTab}
+                onChange={setKindTab}
+                options={(['all', 'negative', 'harvest', 'bid', 'budget', 'placement'] as const)
+                  .map(k => ({ value: k, label: k.charAt(0).toUpperCase() + k.slice(1) }))}
+              />
+            </div>
           </div>
 
-          {/* Kind — includes 'bid' for Sprint 3 */}
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-            {(['all', 'negative', 'harvest', 'bid', 'budget', 'placement'] as const).map(k => (
-              <button key={k} onClick={() => setKindTab(k)}
-                className={`px-3 py-2 capitalize transition-colors ${
-                  kindTab === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}>
-                {k}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Filter by term or reason…"
+              aria-label="Filter by term or reason"
+              className="w-full max-w-xs"
+            />
+            <Select
+              value={confRange}
+              onChange={e => setConfRange(e.target.value as ConfidenceRange)}
+              aria-label="Confidence range"
+              className="w-auto"
+            >
+              <option value="all">All confidence</option>
+              <option value="low">Low (0–49)</option>
+              <option value="med">Medium (50–79)</option>
+              <option value="high">High (80–100)</option>
+            </Select>
+            <Select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as SortBy)}
+              aria-label="Sort order"
+              className="w-auto"
+            >
+              <option value="newest">Newest first</option>
+              <option value="confidence">Highest confidence</option>
+              <option value="spend">Highest spend</option>
+              <option value="sales">Highest sales</option>
+            </Select>
           </div>
-
-          {/* Confidence range */}
-          <select
-            value={confRange}
-            onChange={e => setConfRange(e.target.value as ConfidenceRange)}
-            className="input text-sm py-2 pr-8"
-          >
-            <option value="all">All Confidence</option>
-            <option value="low">Low (0–49)</option>
-            <option value="med">Medium (50–79)</option>
-            <option value="high">High (80–100)</option>
-          </select>
-
-          {/* Sort */}
-          <select
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value as SortBy)}
-            className="input text-sm py-2 pr-8"
-          >
-            <option value="newest">Newest</option>
-            <option value="confidence">Highest Confidence</option>
-            <option value="spend">Highest Spend</option>
-            <option value="sales">Highest Sales</option>
-          </select>
-
-          {/* Search */}
-          <input type="search" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Filter by term or reason…"
-            className="input text-sm flex-1 min-w-[180px]" />
         </div>
       )}
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5">
-          <span className="text-sm font-medium text-blue-800">
+        <div className="flex items-center gap-3 rounded-lg border border-accent-edge bg-accent-weak px-3 py-2">
+          <span className="text-sm font-medium text-accent">
             {selected.size} selected
           </span>
           <button
             onClick={handleBulkApprove}
             disabled={bulkActing}
-            className="text-xs px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 transition-colors font-medium"
+            className="btn-primary text-xs"
           >
             {bulkActing ? '…' : 'Approve Selected'}
           </button>
           <button
             onClick={handleBulkReject}
             disabled={bulkActing}
-            className="text-xs px-3 py-1.5 bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            className="text-xs px-3 py-1.5 bg-surface border border-line text-ink-muted rounded hover:bg-surface-sunken disabled:opacity-50 transition-colors"
           >
             {bulkActing ? '…' : 'Reject Selected'}
           </button>
           <button
             onClick={() => setSelected(new Set())}
-            className="text-xs text-blue-600 hover:underline ml-auto"
+            className="text-xs text-accent hover:underline ml-auto"
           >
             Clear Selection
           </button>
@@ -655,14 +677,17 @@ export default function SuggestionsPage() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="flex items-center gap-2 rounded-lg border border-danger/20 bg-danger-tint px-3 py-2 text-sm text-danger">
+          <AlertTriangle size={15} className="shrink-0" aria-hidden />
+          {error}
+        </div>
       )}
 
       {noContext && (
-        <div className="card text-center py-12 text-gray-500">Select an account to view suggestions.</div>
+        <div className="card text-center py-12 text-ink-muted">Select an account to view suggestions.</div>
       )}
       {noProfiles && (
-        <div className="card text-center py-12 text-gray-500">
+        <div className="card text-center py-12 text-ink-muted">
           No profiles synced. Go to Settings → Accounts and sync profiles first.
         </div>
       )}
@@ -672,37 +697,37 @@ export default function SuggestionsPage() {
         <div className="card p-0 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
+              <tr className="border-b border-hairline bg-surface-sunken">
                 <th className="px-3 py-2.5 w-8">
                   <input
                     type="checkbox"
                     checked={allPageSelected}
                     onChange={toggleAll}
                     disabled={pendingFiltered.length === 0}
-                    className="rounded border-gray-300 text-blue-600 disabled:opacity-30"
+                    className="rounded border-line text-accent disabled:opacity-30"
                     title="Select all pending on page"
                   />
                 </th>
                 {/* Budget suggestions are campaign-level, so this column holds a
                     campaign name for those rows. Naming it "Search Term" only
                     would be wrong for every budget row. */}
-                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 w-44">Term / Campaign</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 w-24">Type</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600">Reason</th>
-                <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-600 w-20">Conf.</th>
-                <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600">Spend</th>
-                <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600">Sales</th>
-                <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600">Orders</th>
-                <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600">ACOS</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 w-20">Status</th>
-                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 w-36">Actions</th>
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-ink-muted w-44">Term / Campaign</th>
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-ink-muted w-24">Type</th>
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-ink-muted">Reason</th>
+                <th className="px-3 py-2.5 text-center text-xs font-semibold text-ink-muted w-20">Conf.</th>
+                <th className="px-3 py-2.5 text-right text-xs font-semibold text-ink-muted">Spend</th>
+                <th className="px-3 py-2.5 text-right text-xs font-semibold text-ink-muted">Sales</th>
+                <th className="px-3 py-2.5 text-right text-xs font-semibold text-ink-muted">Orders</th>
+                <th className="px-3 py-2.5 text-right text-xs font-semibold text-ink-muted">ACOS</th>
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-ink-muted w-20">Status</th>
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-ink-muted w-36">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-hairline">
               {loading ? (
-                <tr><td colSpan={11} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-ink-subtle">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={11} className="px-4 py-12 text-center text-gray-400">
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-ink-subtle">
                   {suggestions.length === 0
                     ? 'No suggestions yet. Sync search terms first, then generate suggestions.'
                     : 'No suggestions match your filters.'}
@@ -716,7 +741,7 @@ export default function SuggestionsPage() {
                 return (
                   <tr
                     key={s.id}
-                    className={`hover:bg-gray-50 cursor-pointer ${!isPending ? 'opacity-60' : ''} ${isSel ? 'bg-blue-50' : ''}`}
+                    className={`hover:bg-surface-sunken cursor-pointer ${!isPending ? 'opacity-60' : ''} ${isSel ? 'bg-accent-weak' : ''}`}
                     onClick={() => setDrawer(s)}
                   >
                     <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
@@ -725,35 +750,38 @@ export default function SuggestionsPage() {
                           type="checkbox"
                           checked={isSel}
                           onChange={() => toggleRow(s.id)}
-                          className="rounded border-gray-300 text-blue-600"
+                          className="rounded border-line text-accent"
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2.5 font-medium text-gray-900 max-w-[176px] truncate" title={s.search_term}>
+                    <td className="px-3 py-2.5 font-medium text-ink max-w-[176px] truncate" title={s.search_term}>
                       {s.search_term}
                       {s.source_type === 'rule' && (
-                        <span className="ml-1.5 text-[10px] text-indigo-500" title={`Rule: ${s.source_rule_name}`}>⚙</span>
+                        <Settings2
+                          size={12} aria-hidden
+                          className="ml-1.5 inline-block shrink-0 align-[-1px] text-ink-faint"
+                        />
                       )}
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${TYPE_COLORS[s.suggestion_type] ?? 'bg-gray-100 text-gray-600'}`}>
+                      <Badge tone={TYPE_TONE[s.suggestion_type] ?? 'neutral'}>
                         {TYPE_LABELS[s.suggestion_type] ?? s.suggestion_type}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-3 py-2.5 text-gray-600 text-xs max-w-[220px] truncate" title={s.reason}>{s.reason}</td>
+                    <td className="px-3 py-2.5 text-ink-muted text-xs max-w-[220px] truncate" title={s.reason}>{s.reason}</td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs ${confidenceBadge(conf)}`}>
+                      <Badge tone={confidenceTone(conf)}>
                         {conf}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{fmtCurrency(s.total_spend)}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{fmtCurrency(s.total_sales)}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{s.total_orders ?? snap.orders}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700">{fmtPct(snap.acos)}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{fmtCurrency(s.total_spend)}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{fmtCurrency(s.total_sales)}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{s.total_orders ?? snap.orders}</td>
+                    <td className="px-3 py-2.5 text-right text-ink">{fmtPct(snap.acos)}</td>
                     <td className="px-3 py-2.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[s.status] ?? ''}`}>
+                      <Badge tone={STATUS_TONE[s.status] ?? 'neutral'}>
                         {s.status}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                       {isPending ? (
@@ -761,14 +789,14 @@ export default function SuggestionsPage() {
                           <button
                             onClick={() => handleApprove(s.id)}
                             disabled={isBusy}
-                            className="text-xs px-2.5 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 transition-colors"
+                            className="btn-primary text-xs h-7 px-2"
                           >
                             {isBusy ? '…' : 'Approve'}
                           </button>
                           <button
                             onClick={() => handleReject(s.id)}
                             disabled={isBusy}
-                            className="text-xs px-2.5 py-1 bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                            className="text-xs px-2.5 py-1 bg-surface border border-line text-ink-muted rounded hover:bg-surface-sunken disabled:opacity-50 transition-colors"
                           >
                             {isBusy ? '…' : 'Reject'}
                           </button>
@@ -777,13 +805,13 @@ export default function SuggestionsPage() {
                         <button
                           onClick={() => handleExecute(s)}
                           disabled={isBusy}
-                          className="text-xs px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                          className="text-xs px-2.5 py-1 bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 transition-colors"
                           title="Apply this change to Amazon"
                         >
                           {isBusy ? 'Applying…' : 'Apply to Amazon'}
                         </button>
                       ) : (
-                        <span className="text-xs text-gray-400 capitalize">{s.status}</span>
+                        <span className="text-xs text-ink-subtle capitalize">{s.status}</span>
                       )}
                     </td>
                   </tr>
@@ -793,10 +821,10 @@ export default function SuggestionsPage() {
           </table>
 
           {filtered.length > 0 && (
-            <div className="px-4 py-2 border-t border-gray-200 text-xs text-gray-400 flex items-center justify-between">
+            <div className="px-4 py-2 border-t border-hairline text-xs text-ink-subtle flex items-center justify-between">
               <span>Showing {filtered.length} of {suggestions.length} suggestions</span>
               {selected.size > 0 && (
-                <span className="text-blue-600">{selected.size} selected</span>
+                <span className="text-accent">{selected.size} selected</span>
               )}
             </div>
           )}
