@@ -340,6 +340,22 @@ docker compose exec frontend grep -o 'http://[a-z0-9.:]*8000' .next/routes-manif
 It must print `http://api:8000`. Changing `API_URL` requires
 `docker compose build frontend`, not a restart.
 
+**`next dev` and `tsc` both pass on code that `next build` rejects.** The gap is
+prerendering: a client component calling `useSearchParams()` — which every screen
+using `useUrlState` does — needs a Suspense boundary above it, and only the
+production build enforces that. Five screens shipped green locally and failed on
+the server after a nine-minute Docker build. The boundary now lives in
+`app/layout.tsx` around `{children}`, so a new screen adopting `useUrlState`
+cannot reintroduce it. Before pushing frontend changes:
+
+```bash
+bash scripts/verify-frontend-build.sh
+```
+
+That builds into `/tmp` inside the container rather than `/app/.next`, because
+building in place overwrites the dev server's output and leaves the local app
+broken until it is restarted — which has also happened here.
+
 **A `curl` returning 200 does not prove the screen renders.** Several bugs in
 this project's history were client-side only — a hooks-order crash, missing
 columns, a wrong default sort — while every API call returned 200. Verify UI
