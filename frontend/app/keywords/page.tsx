@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { useUrlState } from '@/lib/useUrlState'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
 import type { TargetWithMetrics, AdGroup, Campaign } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { DataTable, Column } from '@/components/ui/DataTable'
+import { DataTable, Column, SortDir } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SearchBox } from '@/components/ui/SearchBox'
 import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
@@ -17,6 +18,17 @@ import { emptyDataMessage } from '@/lib/emptyState'
 import { metricColumns } from '@/components/ui/metricColumns'
 
 const LIMIT = 2000
+
+// Module scope on purpose: useUrlState memoises on this object's identity.
+// `sort` stores a column HEADER rather than an index so reordering columns
+// cannot silently change what a saved link sorts by.
+const KEYWORD_FILTER_DEFAULTS = {
+  search: '',
+  status: 'all',
+  match: 'all',
+  sort: 'Spend',
+  dir: 'desc',
+}
 
 export default function KeywordsPage() {
   const { user, loading: authLoading } = useAuth()
@@ -32,9 +44,14 @@ export default function KeywordsPage() {
   const [keywords, setKeywords] = useState<TargetWithMetrics[]>([])
   const [adGroups, setAdGroups] = useState<AdGroup[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [matchFilter, setMatchFilter] = useState('all')
+  // Filters live in the URL, not useState: pressing Back from a keyword used
+  // to remount this screen with its defaults and silently discard the
+  // operator's filters. See lib/useUrlState.ts.
+  const [urlState, setUrlState] = useUrlState(KEYWORD_FILTER_DEFAULTS)
+  const { search, status: statusFilter, match: matchFilter } = urlState
+  const setSearch = (v: string) => setUrlState({ search: v })
+  const setStatusFilter = (v: string) => setUrlState({ status: v })
+  const setMatchFilter = (v: string) => setUrlState({ match: v })
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [totalKeywords, setTotalKeywords] = useState(0)
@@ -198,6 +215,13 @@ export default function KeywordsPage() {
     ...metricColumns<TargetWithMetrics>(),
   ]
 
+  // Plain computation, deliberately not useMemo: this sits after the early
+  // returns above, so a hook here would run on some renders and not others.
+  const sortColFound = columns.findIndex(c => c.header === urlState.sort)
+  const sortCol =
+    sortColFound >= 0 ? sortColFound : columns.findIndex(c => c.header === 'Spend')
+  const sortDir: SortDir = urlState.dir === 'asc' ? 'asc' : 'desc'
+
   const isLoading = dataLoading || profilesLoading
   const accountLabel = currentAccount?.name ?? 'this account'
 
@@ -232,8 +256,11 @@ export default function KeywordsPage() {
         <DataTable
           columns={columns}
           rows={filtered}
-          defaultSortCol={columns.findIndex(c => c.header === 'Spend')}
-          defaultSortDir="desc"
+          sortCol={sortCol}
+          sortDir={sortDir}
+          onSortChange={(col, dir) =>
+            setUrlState({ sort: col === null ? '' : columns[col].header, dir })
+          }
           rowKey={r => r.id}
           loading={isLoading}
           emptyTitle="No keywords found"

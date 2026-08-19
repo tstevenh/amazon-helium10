@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { useUrlState } from '@/lib/useUrlState'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
@@ -241,6 +242,16 @@ function SummaryCards({ suggestions }: { suggestions: Suggestion[] }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
+// Module scope: useUrlState memoises on this object's identity, so a literal
+// built inside the component would be a new object every render.
+const SUGGESTION_FILTER_DEFAULTS = {
+  status: 'pending',
+  kind: 'all',
+  confidence: 'all',
+  sort: 'newest',
+  search: '',
+}
+
 export default function SuggestionsPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
@@ -257,12 +268,21 @@ export default function SuggestionsPage() {
   const [actionError,  setActionError]  = useState<string | null>(null)
   const [bulkMsg,      setBulkMsg]      = useState<string | null>(null)
 
-  // filters
-  const [statusTab,    setStatusTab]    = useState<string>('pending')
-  const [kindTab,      setKindTab]      = useState<string>('all')
-  const [confRange,    setConfRange]    = useState<ConfidenceRange>('all')
-  const [sortBy,       setSortBy]       = useState<SortBy>('newest')
-  const [search,       setSearch]       = useState('')
+  // Filters live in the URL, not useState, so Back from a drill-down restores
+  // them instead of silently resetting to "pending / newest". The casts are
+  // safe: an unknown value from a hand-edited URL simply matches no row rather
+  // than crashing, and the tab UI writes only its own known values.
+  const [urlState, setUrlState] = useUrlState(SUGGESTION_FILTER_DEFAULTS)
+  const statusTab = urlState.status
+  const kindTab = urlState.kind
+  const confRange = urlState.confidence as ConfidenceRange
+  const sortBy = urlState.sort as SortBy
+  const search = urlState.search
+  const setStatusTab = (v: string) => setUrlState({ status: v })
+  const setKindTab = (v: string) => setUrlState({ kind: v })
+  const setConfRange = (v: ConfidenceRange) => setUrlState({ confidence: v })
+  const setSortBy = (v: SortBy) => setUrlState({ sort: v })
+  const setSearch = (v: string) => setUrlState({ search: v })
 
   // bulk selection
   const [selected,     setSelected]     = useState<Set<string>>(new Set())

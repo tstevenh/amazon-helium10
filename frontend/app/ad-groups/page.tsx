@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { useUrlState } from '@/lib/useUrlState'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
 import type { AdGroupWithMetrics, Campaign } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { DataTable, Column } from '@/components/ui/DataTable'
+import { DataTable, Column, SortDir } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SearchBox } from '@/components/ui/SearchBox'
 import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
@@ -15,6 +16,16 @@ import { ErrorState } from '@/components/ui/ErrorState'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { emptyDataMessage } from '@/lib/emptyState'
 import { metricColumns } from '@/components/ui/metricColumns'
+
+// Module scope on purpose: useUrlState memoises on this object's identity.
+// `sort` stores a column HEADER rather than an index so reordering columns
+// cannot silently change what a saved link sorts by.
+const AD_GROUP_FILTER_DEFAULTS = {
+  search: '',
+  status: 'all',
+  sort: 'Spend',
+  dir: 'desc',
+}
 
 export default function AdGroupsPage() {
   const { user, loading: authLoading } = useAuth()
@@ -29,8 +40,11 @@ export default function AdGroupsPage() {
 
   const [adGroups, setAdGroups] = useState<AdGroupWithMetrics[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  // Filters live in the URL, not useState — see lib/useUrlState.ts for why.
+  const [urlState, setUrlState] = useUrlState(AD_GROUP_FILTER_DEFAULTS)
+  const { search, status: statusFilter } = urlState
+  const setSearch = (v: string) => setUrlState({ search: v })
+  const setStatusFilter = (v: string) => setUrlState({ status: v })
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -158,6 +172,13 @@ export default function AdGroupsPage() {
     ...metricColumns<AdGroupWithMetrics>(),
   ]
 
+  // Plain computation, deliberately not useMemo: this sits after the early
+  // returns above, so a hook here would run on some renders and not others.
+  const sortColFound = columns.findIndex(c => c.header === urlState.sort)
+  const sortCol =
+    sortColFound >= 0 ? sortColFound : columns.findIndex(c => c.header === 'Spend')
+  const sortDir: SortDir = urlState.dir === 'asc' ? 'asc' : 'desc'
+
   const isLoading = dataLoading || profilesLoading
   const accountLabel = currentAccount?.name ?? 'this account'
 
@@ -184,8 +205,11 @@ export default function AdGroupsPage() {
         <DataTable
           columns={columns}
           rows={filtered}
-          defaultSortCol={columns.findIndex(c => c.header === 'Spend')}
-          defaultSortDir="desc"
+          sortCol={sortCol}
+          sortDir={sortDir}
+          onSortChange={(col, dir) =>
+            setUrlState({ sort: col === null ? '' : columns[col].header, dir })
+          }
           rowKey={r => r.id}
           onRowClick={r => router.push(`/ad-groups/${r.id}`)}
           rowHref={r => `/ad-groups/${r.id}`}

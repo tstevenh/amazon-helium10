@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { useUrlState } from '@/lib/useUrlState'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
@@ -53,6 +54,25 @@ const DATE_PRESETS = [
 
 // ── component ─────────────────────────────────────────────────────────────────
 
+// Module scope: useUrlState memoises on this object's identity, so a literal
+// built inside the component would be a new object every render.
+//
+// Empty date_from/date_to mean "the Last 30d preset", resolved at render time
+// rather than stored, so a pasted link still means "the last 30 days"
+// tomorrow instead of freezing today's dates.
+const SEARCH_TERM_DEFAULTS = {
+  date_from: '',
+  date_to: '',
+  campaign: '',
+  min_spend: '',
+  min_sales: '',
+  max_acos: '',
+  search: '',
+  preset: 'Last 30d',
+  sort: 'cost',
+  dir: 'desc',
+}
+
 export default function SearchTermsPage() {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
@@ -61,15 +81,24 @@ export default function SearchTermsPage() {
     accountsLoading, profilesLoading,
   } = useAccountProfile()
 
-  // filters
-  const [dateFrom, setDateFrom]   = useState(daysAgo(30))
-  const [dateTo,   setDateTo]     = useState(today())
-  const [campaignId, setCampaignId] = useState('')
-  const [minSpend,  setMinSpend]  = useState('')
-  const [minSales,  setMinSales]  = useState('')
-  const [maxAcos,   setMaxAcos]   = useState('')
-  const [search,    setSearch]    = useState('')
-  const [activePreset, setActivePreset] = useState('Last 30d')
+  // Filters, date range and sort live in the URL rather than useState, so
+  // Back from a drill-down restores them. See lib/useUrlState.ts.
+  const [urlState, setUrlState] = useUrlState(SEARCH_TERM_DEFAULTS)
+  const dateFrom = urlState.date_from || daysAgo(30)
+  const dateTo = urlState.date_to || today()
+  const campaignId = urlState.campaign
+  const minSpend = urlState.min_spend
+  const minSales = urlState.min_sales
+  const maxAcos = urlState.max_acos
+  const search = urlState.search
+  const activePreset = urlState.preset
+  const setDateFrom = (v: string) => setUrlState({ date_from: v, preset: '' })
+  const setDateTo = (v: string) => setUrlState({ date_to: v, preset: '' })
+  const setCampaignId = (v: string) => setUrlState({ campaign: v })
+  const setMinSpend = (v: string) => setUrlState({ min_spend: v })
+  const setMinSales = (v: string) => setUrlState({ min_sales: v })
+  const setMaxAcos = (v: string) => setUrlState({ max_acos: v })
+  const setSearch = (v: string) => setUrlState({ search: v })
 
   // data
   const [rows,      setRows]      = useState<SearchTermRow[]>([])
@@ -80,8 +109,8 @@ export default function SearchTermsPage() {
   const [syncMsg,   setSyncMsg]   = useState<string | null>(null)
 
   // sort + pagination
-  const [sortKey,   setSortKey]   = useState<SortKey>('cost')
-  const [sortDir,   setSortDir]   = useState<SortDir>('desc')
+  const sortKey = urlState.sort as SortKey
+  const sortDir: SortDir = urlState.dir === 'asc' ? 'asc' : 'desc'
   const [page,      setPage]      = useState(1)
 
   // auth guard
@@ -140,9 +169,10 @@ export default function SearchTermsPage() {
   }, [user, accountsLoading, profileIds, load])
 
   function applyPreset(preset: typeof DATE_PRESETS[0]) {
-    setActivePreset(preset.label)
-    setDateFrom(preset.from())
-    setDateTo(today())
+    // One call, not three. Each setUrlState reads the state captured at this
+    // render, so three sequential calls would each overwrite the previous
+    // one's parameter and only the last would survive.
+    setUrlState({ preset: preset.label, date_from: preset.from(), date_to: today() })
   }
 
   async function handleSync() {
@@ -175,8 +205,8 @@ export default function SearchTermsPage() {
   const pageRows   = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   function handleSort(key: SortKey) {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortKey(key); setSortDir('desc') }
+    if (sortKey === key) setUrlState({ dir: sortDir === 'asc' ? 'desc' : 'asc' })
+    else setUrlState({ sort: String(key), dir: 'desc' })
   }
 
   function SortIndicator({ k }: { k: SortKey }) {
@@ -231,10 +261,10 @@ export default function SearchTermsPage() {
             </button>
           ))}
           <div className="flex items-center gap-1 ml-2">
-            <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setActivePreset('') }}
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
               className="input text-xs py-1 px-2 w-36" />
             <span className="text-gray-400 text-xs">to</span>
-            <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setActivePreset('') }}
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               className="input text-xs py-1 px-2 w-36" />
           </div>
         </div>
