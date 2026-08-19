@@ -58,10 +58,52 @@ class DaypartingEntry(Base):
     # hour_start inclusive, hour_end exclusive, marketplace-local
     hour_start     = Column(SmallInteger, nullable=False)
     hour_end       = Column(SmallInteger, nullable=False)
-    # pause | enable | bid_adjust — bid_adjust is reserved, not implemented
+    # pause | enable | decrease_bid | increase_bid
+    # ('bid_adjust' is still permitted by the CHECK constraint because 017
+    #  created it as a reserved value; the service rejects it as unimplemented.)
     action_type    = Column(String(20), nullable=False)
+    # Legacy from 017, never populated. adjust_pct below is the real field.
     bid_multiplier = Column(Numeric(5, 2), nullable=True)
+    # Always POSITIVE; direction comes from action_type. A signed percentage
+    # plus a direction gives two ways to express "down", and
+    # "increase_bid by -20" is a bug waiting to be written.
+    adjust_pct     = Column(Numeric(6, 2), nullable=True)
+    # Floor and ceiling, as in Helium 10's "Min Bid" box. Both optional.
+    min_bid        = Column(Numeric(10, 2), nullable=True)
+    max_bid        = Column(Numeric(10, 2), nullable=True)
     created_at     = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
+class DaypartingBidState(Base):
+    """The bid to return to, and the last bid this app wrote.
+
+    Dayparting reconciles: every run asks "what should this be right now?".
+    That works for pause because "paused" is a state. It does not work for
+    "reduce 20%", which is an operation — re-applying it hourly compounds
+    ($0.50 -> 0.40 -> 0.32 -> 0.26) and wrecks the bid within a day.
+
+    Remembering the baseline turns the adjustment into a state:
+    target = baseline * (1 +/- pct), clamped. Run it once or fifty times and
+    the answer is the same, and outside every window the bid goes back to
+    baseline.
+
+    last_written_bid is how a human's edit is noticed. If Amazon's bid is not
+    the number this app last wrote, a person changed it, and the row is
+    RELEASED rather than overwritten — people outrank schedules. Note this
+    detection is only as fresh as the last sync, since the comparison uses the
+    locally stored bid.
+    """
+    __tablename__ = "dayparting_bid_state"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    schedule_id      = Column(UUID(as_uuid=True), ForeignKey("dayparting_schedules.id", ondelete="CASCADE"), nullable=False)
+    target_id        = Column(UUID(as_uuid=True), ForeignKey("targets.id", ondelete="CASCADE"), nullable=False)
+    baseline_bid     = Column(Numeric(10, 2), nullable=False)
+    last_written_bid = Column(Numeric(10, 2), nullable=True)
+    released_at      = Column(TIMESTAMP(timezone=True), nullable=True)
+    released_reason  = Column(Text, nullable=True)
+    created_at       = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at       = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
 
 class DaypartingRun(Base):

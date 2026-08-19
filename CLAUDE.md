@@ -52,7 +52,7 @@ limitation — see "Unit tests do not touch the database" below.
 ```bash
 docker compose exec api alembic upgrade head
 docker compose exec api alembic revision -m "description"
-docker compose exec api alembic heads      # current: 022
+docker compose exec api alembic heads      # current: 023
 ```
 
 `backend/alembic/` is bind-mounted. It did not used to be, and new migration
@@ -179,6 +179,32 @@ human approving each occurrence, so its design is deliberate:
   recommend them. Do not add a heuristic that implies otherwise.
 - Schedules are created inactive. Activation is a separate endpoint so the
   audit trail records who accepted the unattended behaviour.
+
+**Bid windows must derive from a stored baseline, never from the current bid.**
+`action_type` is `pause | enable | decrease_bid | increase_bid`. Because the
+executor reconciles hourly, applying "−20%" to whatever the bid happens to be
+compounds — $0.50 → 0.40 → 0.32 → 0.26 within one day, then lower again
+tomorrow. `dayparting_bid_state` stores `baseline_bid` so the answer is always
+`baseline × (1 ± pct)`, clamped by the entry's `min_bid`/`max_bid` and then by
+Amazon's `AMAZON_MIN_BID`. Outside every bid window the baseline is restored,
+which is why `reconcile_schedule` must **not** return early when
+`desired_state_at` is None — a bid-only schedule has no desired state at any
+hour, and returning would leave the discount in place forever.
+
+Three further traps in that code:
+
+- **A rejected write must not update `last_written_bid`.** Drift detection
+  compares Amazon's bid against what the app last wrote, so recording a write
+  Amazon refused makes the next run see a phantom manual edit and release a
+  keyword nobody touched — with a notification blaming the team.
+- **Amazon has no hourly bid multiplier**, so a bid window is written per
+  keyword. This account has 222,384 targets. `dayparting_max_bid_writes_per_run`
+  caps it, only enabled campaigns and enabled keywords are touched, and the bid
+  pass is skipped entirely while the schedule wants a pause. Anything the cap
+  drops is logged and recorded on the run — never silently truncated.
+- **`bid_adjust` from migration 017** is still allowed by the CHECK constraint
+  because rows may exist, but the API rejects it and the UI drops it. Do not
+  revive it; it has no executor.
 
 ### Adding a rule type touches five places
 

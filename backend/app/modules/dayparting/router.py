@@ -8,6 +8,7 @@ them means the audit trail records who accepted that, and when.
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
@@ -39,10 +40,17 @@ class EntryIn(BaseModel):
     day_of_week: int = Field(ge=0, le=6, description="0 = Monday .. 6 = Sunday")
     hour_start:  int = Field(ge=0, le=23, description="inclusive")
     hour_end:    int = Field(ge=1, le=24, description="exclusive")
-    # bid_adjust exists in the spec and the schema, but there is no executor
-    # for it. Accepting it here would store a row the scheduler silently
-    # ignores, which reads as "dayparting is broken".
-    action_type: Literal["pause", "enable"]
+    # 'bid_adjust' from 017 is deliberately NOT accepted: it was a reserved
+    # placeholder with no executor, and storing one would leave a row the
+    # scheduler ignores, which reads as "dayparting is broken". decrease_bid
+    # and increase_bid replace it and do have an executor.
+    action_type: Literal["pause", "enable", "decrease_bid", "increase_bid"]
+    # Always positive; the direction is in action_type. Amazon's own placement
+    # adjustments cap at 900%, so the same ceiling is used here.
+    adjust_pct: Optional[Decimal] = Field(default=None, gt=0, le=900)
+    # Optional floor and ceiling, as in Helium 10's "Min Bid" box.
+    min_bid: Optional[Decimal] = Field(default=None, gt=0)
+    max_bid: Optional[Decimal] = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _window_moves_forward(self):
@@ -51,6 +59,35 @@ class EntryIn(BaseModel):
                 "hour_end must be after hour_start. For an overnight window "
                 "such as 22:00-02:00, add two entries: 22-24 on one day and "
                 "0-2 on the next."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _bid_fields_match_the_action(self):
+        is_bid = self.action_type in ("decrease_bid", "increase_bid")
+        if is_bid and self.adjust_pct is None:
+            raise ValueError(
+                f"{self.action_type} needs adjust_pct — a bid window with no "
+                f"percentage would do nothing every hour, which looks like a bug."
+            )
+        if not is_bid and (self.adjust_pct is not None
+                           or self.min_bid is not None
+                           or self.max_bid is not None):
+            raise ValueError(
+                f"adjust_pct, min_bid and max_bid only apply to decrease_bid "
+                f"and increase_bid, not to {self.action_type}. Silently ignoring "
+                f"them would hide a mistake in the schedule."
+            )
+        if (self.min_bid is not None and self.max_bid is not None
+                and self.min_bid > self.max_bid):
+            raise ValueError("min_bid cannot be greater than max_bid")
+        # A decrease that can never go below its own floor is a no-op the
+        # operator almost certainly did not intend.
+        if (self.action_type == "decrease_bid" and self.adjust_pct is not None
+                and self.adjust_pct >= 100):
+            raise ValueError(
+                "decrease_bid must be under 100% — a 100% cut would set the bid "
+                "to zero, which Amazon rejects. Use a pause window instead."
             )
         return self
 
@@ -130,6 +167,7 @@ def _serialise(db: Session, schedule: DaypartingSchedule) -> ScheduleOut:
     out.entries = [
         EntryOut(id=e.id, day_of_week=e.day_of_week, hour_start=e.hour_start,
                  hour_end=e.hour_end, action_type=e.action_type,
+                 adjust_pct=e.adjust_pct, min_bid=e.min_bid, max_bid=e.max_bid,
                  day_name=_DAY_NAMES[e.day_of_week])
         for e in entries
     ]
@@ -167,7 +205,8 @@ def _replace_entries(db: Session, schedule: DaypartingSchedule,
         db.add(DaypartingEntry(
             schedule_id=schedule.id, day_of_week=e.day_of_week,
             hour_start=e.hour_start, hour_end=e.hour_end,
-            action_type=e.action_type,
+            action_type=e.action_type, adjust_pct=e.adjust_pct,
+            min_bid=e.min_bid, max_bid=e.max_bid,
         ))
 
 
@@ -325,7 +364,7 @@ def run_now(
     schedule = _load(db, schedule_id)
     if not schedule.is_active:
         from app.modules.dayparting.service import (
-            _profile_now, desired_state_at,
+            _profile_now, desired_bid_directive_at, desired_state_at,
         )
         from app.modules.accounts.models import AdsProfile
 
@@ -335,11 +374,29 @@ def run_now(
         entries = db.query(DaypartingEntry).filter(
             DaypartingEntry.schedule_id == schedule.id).all()
         desired = desired_state_at(entries, now_local) if now_local else None
+        directive = desired_bid_directive_at(entries, now_local) if now_local else None
+
+        # A bid-only schedule has no desired STATE at any hour. Reporting only
+        # would_set_state would show "null" and read as "this schedule does
+        # nothing" — which is how an operator concludes the feature is broken.
+        if desired == "paused":
+            bid_note = "no bid change — the campaign should be paused right now"
+        elif directive is not None:
+            bid_note = (
+                f"{'decrease' if directive.action == 'decrease_bid' else 'increase'} "
+                f"every keyword bid by {directive.pct}% from its baseline"
+                + (f", floor ${directive.min_bid}" if directive.min_bid else "")
+                + (f", ceiling ${directive.max_bid}" if directive.max_bid else "")
+            )
+        else:
+            bid_note = "restore every keyword bid to its baseline"
+
         return {
             "dry_run": True,
             "reason": "schedule is not active, so nothing was sent to Amazon",
             "local_time": now_local.strftime("%Y-%m-%d %H:%M %Z") if now_local else None,
             "would_set_state": desired,
+            "would_adjust_bids": bid_note,
         }
 
     result = DaypartingService(db).reconcile_schedule(schedule)

@@ -15,7 +15,7 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
-import type { Campaign, DaypartingSchedule, DaypartingRun } from '@/lib/types'
+import type { Campaign, DaypartingEntryInput, DaypartingSchedule, DaypartingRun } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -146,8 +146,20 @@ export default function DaypartingPage() {
     try {
       const r = await api.runDaypartingNow(s.id)
       if (r.dry_run) {
-        const state = r.would_set_state ?? 'no change'
-        notify(`At ${r.local_time}, this schedule wants: ${state}. Nothing was sent — it is not active.`)
+        // Report the bid intent too. A schedule made only of bid windows has
+        // no desired state at any hour, so showing state alone said
+        // "no change" and read as "this schedule does nothing".
+        // Map the stored state to a verb phrase. Interpolating the raw value
+        // produced "wants to paused".
+        const state = r.would_set_state === 'paused' ? 'pause these campaigns'
+          : r.would_set_state === 'enabled' ? 'enable these campaigns'
+          : 'leave the on/off state alone'
+        const bids = r.would_adjust_bids
+        notify(
+          `At ${r.local_time}, this schedule wants to ${state}` +
+          (bids ? `, and ${bids}` : '') +
+          `. Nothing was sent — it is not active.`,
+        )
       } else {
         notify(`Checked ${r.checked}, changed ${r.changed}, skipped ${r.skipped}, failed ${r.failed}`)
       }
@@ -167,7 +179,7 @@ export default function DaypartingPage() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <PageHeader
           title="Dayparting"
-          subtitle="Pause and re-enable campaigns by hour. You choose the hours."
+          subtitle="Pause, re-enable, or adjust bids by hour and weekday. You choose the hours."
         />
         <button className="btn-primary" onClick={() => setEditing('new')}>
           + New Schedule
@@ -282,17 +294,82 @@ export default function DaypartingPage() {
   )
 }
 
+
+/**
+ * A painted cell has to carry more than "pause" now: a bid window also has a
+ * percentage and optional min/max. So a cell holds a SPEC STRING encoding the
+ * whole action.
+ *
+ *   pause | enable | decrease_bid:20:0.18: | increase_bid:50::1.20
+ *
+ * Encoding it as a string keeps the run-merging in toEntries() a plain
+ * equality check, so two adjacent hours only merge into one window when they
+ * agree on the percentage and the limits as well as the action — painting
+ * -10% in the morning and -20% in the afternoon correctly produces two
+ * windows rather than one wrong one.
+ */
+type CellSpec = string
+
+function makeSpec(
+  action: string, pct: string, minBid: string, maxBid: string,
+): CellSpec {
+  if (action !== 'decrease_bid' && action !== 'increase_bid') return action
+  return `${action}:${pct}:${minBid}:${maxBid}`
+}
+
+function parseSpec(spec: CellSpec) {
+  const [action, pct, minBid, maxBid] = spec.split(':')
+  const isBid = action === 'decrease_bid' || action === 'increase_bid'
+  return {
+    action_type: action,
+    adjust_pct: isBid && pct ? Number(pct) : null,
+    min_bid: isBid && minBid ? Number(minBid) : null,
+    max_bid: isBid && maxBid ? Number(maxBid) : null,
+  }
+}
+
+/** Colour per action. Amber for down, blue for up — money leaving vs money spent. */
+function specColour(spec: CellSpec | undefined, filled: boolean): string {
+  const action = spec?.split(':')[0]
+  if (action === 'pause') return filled ? 'bg-red-400 border-red-400' : 'bg-red-400'
+  if (action === 'enable') return filled ? 'bg-green-400 border-green-400' : 'bg-green-400'
+  if (action === 'decrease_bid') return filled ? 'bg-amber-400 border-amber-400' : 'bg-amber-400'
+  if (action === 'increase_bid') return filled ? 'bg-blue-400 border-blue-400' : 'bg-blue-400'
+  return filled ? 'bg-white border-gray-200 hover:border-gray-400' : 'bg-gray-100'
+}
+
+function specLabel(spec: CellSpec | undefined): string {
+  if (!spec) return 'untouched'
+  const { action_type, adjust_pct, min_bid, max_bid } = parseSpec(spec)
+  if (action_type === 'pause') return 'paused'
+  if (action_type === 'enable') return 'enabled'
+  const dir = action_type === 'decrease_bid' ? '−' : '+'
+  const limits = [
+    min_bid ? `min $${min_bid}` : '',
+    max_bid ? `max $${max_bid}` : '',
+  ].filter(Boolean).join(', ')
+  return `bid ${dir}${adjust_pct}% from baseline${limits ? ` (${limits})` : ''}`
+}
+
 // ── Read-only grid summary ────────────────────────────────────────────────
 
 function ScheduleGridPreview({ schedule }: { schedule: DaypartingSchedule }) {
+  // Map rather than Set: the cell needs the whole spec to colour and label
+  // itself, not merely "is something set here".
   const filled = useMemo(() => {
-    const set = new Set<string>()
+    const map = new Map<string, CellSpec>()
     for (const e of schedule.entries) {
+      const spec = makeSpec(
+        e.action_type,
+        e.adjust_pct != null ? String(e.adjust_pct) : '',
+        e.min_bid != null ? String(e.min_bid) : '',
+        e.max_bid != null ? String(e.max_bid) : '',
+      )
       for (let h = e.hour_start; h < e.hour_end; h++) {
-        set.add(`${e.day_of_week}-${h}-${e.action_type}`)
+        map.set(`${e.day_of_week}-${h}`, spec)
       }
     }
-    return set
+    return map
   }, [schedule.entries])
 
   return (
@@ -309,15 +386,12 @@ function ScheduleGridPreview({ schedule }: { schedule: DaypartingSchedule }) {
           <div key={day} className="flex gap-[2px] mb-[2px] items-center">
             <div className="w-9 text-[10px] text-gray-500">{day}</div>
             {HOURS.map(h => {
-              const paused = filled.has(`${dow}-${h}-pause`)
-              const enabled = filled.has(`${dow}-${h}-enable`)
+              const spec = filled.get(`${dow}-${h}`)
               return (
                 <div
                   key={h}
-                  title={`${day} ${hourLabel(h)} — ${paused ? 'paused' : enabled ? 'enabled' : 'untouched'}`}
-                  className={`w-3.5 h-3.5 rounded-sm ${
-                    paused ? 'bg-red-400' : enabled ? 'bg-green-400' : 'bg-gray-100'
-                  }`}
+                  title={`${day} ${hourLabel(h)} — ${specLabel(spec)}`}
+                  className={`w-3.5 h-3.5 rounded-sm ${specColour(spec, false)}`}
                 />
               )
             })}
@@ -326,6 +400,8 @@ function ScheduleGridPreview({ schedule }: { schedule: DaypartingSchedule }) {
         <div className="flex gap-3 mt-1.5 ml-9 text-[10px] text-gray-500">
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" /> paused</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" /> enabled</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-400 inline-block" /> bid down</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block" /> bid up</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-gray-100 inline-block" /> left alone</span>
         </div>
       </div>
@@ -349,17 +425,33 @@ function ScheduleEditor({
   const [description, setDescription] = useState(schedule?.description ?? '')
   const [profileId, setProfileId] = useState(schedule?.profile_id ?? defaultProfileId)
   const [selected, setSelected] = useState<Set<string>>(new Set(schedule?.campaign_ids ?? []))
-  const [action, setAction] = useState<'pause' | 'enable'>('pause')
+  const [action, setAction] =
+    useState<'pause' | 'enable' | 'decrease_bid' | 'increase_bid'>('pause')
+  // Bid parameters for the brush. Kept as strings so a half-typed "1." does
+  // not become NaN mid-keystroke.
+  const [pct, setPct] = useState('20')
+  const [minBid, setMinBid] = useState('')
+  const [maxBid, setMaxBid] = useState('')
+  const isBidAction = action === 'decrease_bid' || action === 'increase_bid'
+  const brush = makeSpec(action, pct, minBid, maxBid)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /** cellKey `${dow}-${hour}` → action. One action per cell; last paint wins. */
-  const [cells, setCells] = useState<Map<string, 'pause' | 'enable'>>(() => {
-    const m = new Map<string, 'pause' | 'enable'>()
+  /** cellKey `${dow}-${hour}` → spec. One action per cell; last paint wins. */
+  const [cells, setCells] = useState<Map<string, CellSpec>>(() => {
+    const m = new Map<string, CellSpec>()
     for (const e of schedule?.entries ?? []) {
-      if (e.action_type !== 'pause' && e.action_type !== 'enable') continue
+      // 'bid_adjust' from the original schema has no executor and the API
+      // rejects it, so an old row is dropped rather than shown as editable.
+      if (!['pause', 'enable', 'decrease_bid', 'increase_bid'].includes(e.action_type)) continue
+      const spec = makeSpec(
+        e.action_type,
+        e.adjust_pct != null ? String(e.adjust_pct) : '',
+        e.min_bid != null ? String(e.min_bid) : '',
+        e.max_bid != null ? String(e.max_bid) : '',
+      )
       for (let h = e.hour_start; h < e.hour_end; h++) {
-        m.set(`${e.day_of_week}-${h}`, e.action_type as 'pause' | 'enable')
+        m.set(`${e.day_of_week}-${h}`, spec)
       }
     }
     return m
@@ -374,8 +466,8 @@ function ScheduleEditor({
     setCells(prev => {
       const next = new Map(prev)
       const key = `${dow}-${hour}`
-      if (next.get(key) === action) next.delete(key)
-      else next.set(key, action)
+      if (next.get(key) === brush) next.delete(key)
+      else next.set(key, brush)
       return next
     })
   }
@@ -383,10 +475,10 @@ function ScheduleEditor({
   function paintRow(dow: number, hours: number[]) {
     setCells(prev => {
       const next = new Map(prev)
-      const allSet = hours.every(h => next.get(`${dow}-${h}`) === action)
+      const allSet = hours.every(h => next.get(`${dow}-${h}`) === brush)
       for (const h of hours) {
         if (allSet) next.delete(`${dow}-${h}`)
-        else next.set(`${dow}-${h}`, action)
+        else next.set(`${dow}-${h}`, brush)
       }
       return next
     })
@@ -400,18 +492,23 @@ function ScheduleEditor({
    * on adjacent days, which is exactly what the executor expects.
    */
   function toEntries() {
-    const out: { day_of_week: number; hour_start: number; hour_end: number; action_type: string }[] = []
+    const out: DaypartingEntryInput[] = []
     for (let dow = 0; dow < 7; dow++) {
       let runStart: number | null = null
-      let runAction: 'pause' | 'enable' | null = null
+      let runSpec: CellSpec | null = null
       for (let h = 0; h <= 24; h++) {
         const a = h < 24 ? cells.get(`${dow}-${h}`) ?? null : null
-        if (a !== runAction) {
-          if (runAction !== null && runStart !== null) {
-            out.push({ day_of_week: dow, hour_start: runStart, hour_end: h, action_type: runAction })
+        // Equality on the whole spec, so -10% and -20% never merge into one
+        // window even when the hours are adjacent.
+        if (a !== runSpec) {
+          if (runSpec !== null && runStart !== null) {
+            out.push({
+              day_of_week: dow, hour_start: runStart, hour_end: h,
+              ...parseSpec(runSpec),
+            })
           }
           runStart = a === null ? null : h
-          runAction = a
+          runSpec = a
         }
       }
     }
@@ -485,20 +582,71 @@ function ScheduleEditor({
               <label className="block text-sm font-medium text-gray-700">
                 Hours <span className="text-red-500">*</span>
               </label>
-              <div className="flex items-center gap-2 text-xs">
+              <div className="flex items-center gap-2 text-xs flex-wrap">
                 <span className="text-gray-500">Painting:</span>
                 <button type="button" onClick={() => setAction('pause')}
                         className={`px-2 py-1 rounded border ${action === 'pause'
                           ? 'bg-red-500 text-white border-red-500' : 'bg-white border-gray-300'}`}>
-                  Pause
+                  Pause campaign
                 </button>
                 <button type="button" onClick={() => setAction('enable')}
                         className={`px-2 py-1 rounded border ${action === 'enable'
                           ? 'bg-green-600 text-white border-green-600' : 'bg-white border-gray-300'}`}>
-                  Enable
+                  Enable campaign
+                </button>
+                <button type="button" onClick={() => setAction('decrease_bid')}
+                        className={`px-2 py-1 rounded border ${action === 'decrease_bid'
+                          ? 'bg-amber-500 text-white border-amber-500' : 'bg-white border-gray-300'}`}>
+                  Decrease bid
+                </button>
+                <button type="button" onClick={() => setAction('increase_bid')}
+                        className={`px-2 py-1 rounded border ${action === 'increase_bid'
+                          ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300'}`}>
+                  Increase bid
                 </button>
               </div>
             </div>
+
+            {isBidAction && (
+              <div className="mb-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <div className="flex items-end gap-3 flex-wrap text-xs">
+                  <label className="block">
+                    <span className="block text-gray-600 mb-1">
+                      {action === 'decrease_bid' ? 'Decrease by' : 'Increase by'} *
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <input type="number" min="0.01" max={action === 'decrease_bid' ? '99.99' : '900'}
+                             step="1" value={pct} onChange={e => setPct(e.target.value)}
+                             className="input w-20" />
+                      <span className="text-gray-500">%</span>
+                    </div>
+                  </label>
+                  <label className="block">
+                    <span className="block text-gray-600 mb-1">Min bid</span>
+                    <input type="number" min="0.02" step="0.01" placeholder="none"
+                           value={minBid} onChange={e => setMinBid(e.target.value)}
+                           className="input w-24" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-gray-600 mb-1">Max bid</span>
+                    <input type="number" min="0.02" step="0.01" placeholder="none"
+                           value={maxBid} onChange={e => setMaxBid(e.target.value)}
+                           className="input w-24" />
+                  </label>
+                </div>
+                <p className="text-[11px] text-amber-900 mt-2 leading-relaxed">
+                  Applied to each keyword&apos;s <strong>baseline bid</strong> — the bid it
+                  had before this schedule touched it — not to the current bid, so it
+                  never compounds. Outside these hours the baseline is restored.
+                  Change the percentage and paint again to add a second, different
+                  window on the same day.
+                </p>
+                <p className="text-[11px] text-amber-900 mt-1 leading-relaxed">
+                  If someone edits a bid in Seller Central, this schedule stops
+                  managing that keyword and notifies you rather than overwriting them.
+                </p>
+              </div>
+            )}
 
             <div className="overflow-x-auto border border-gray-200 rounded-lg p-3">
               <div className="inline-block">
@@ -525,12 +673,8 @@ function ScheduleEditor({
                           key={h}
                           type="button"
                           onClick={() => toggleCell(dow, h)}
-                          title={`${day} ${hourLabel(h)}`}
-                          className={`w-5 h-5 rounded-sm border ${
-                            v === 'pause' ? 'bg-red-400 border-red-400'
-                              : v === 'enable' ? 'bg-green-400 border-green-400'
-                              : 'bg-white border-gray-200 hover:border-gray-400'
-                          }`}
+                          title={`${day} ${hourLabel(h)} — ${specLabel(v)}`}
+                          className={`w-5 h-5 rounded-sm border ${specColour(v, true)}`}
                         />
                       )
                     })}

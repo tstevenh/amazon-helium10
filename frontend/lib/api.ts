@@ -47,6 +47,36 @@ export function clearToken() {
   if (typeof window !== 'undefined') localStorage.removeItem(TOKEN_KEY)
 }
 
+
+/**
+ * Turn a FastAPI error body into something a person can read.
+ *
+ * A 422 sends `detail` as an ARRAY of {loc, msg} objects, so the previous
+ * `body.detail ?? 'Request failed'` handed an array to Error() and the UI
+ * displayed "[object Object],[object Object]" — the operator was told nothing
+ * at all. This affects every validation error in the app, not one screen.
+ *
+ * `loc` is ['body', 'entries', 0, 'action_type']; the leading 'body' is noise
+ * to a user, and the index is worth keeping because it says WHICH row is wrong.
+ */
+function errorMessage(body: unknown, fallback: string): string {
+  const detail = (body as { detail?: unknown })?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const parts = detail.map(d => {
+      const item = d as { loc?: unknown[]; msg?: string }
+      const msg = (item.msg ?? 'invalid value').replace(/^Value error,\s*/, '')
+      const where = Array.isArray(item.loc)
+        ? item.loc.filter(p => p !== 'body').join('.')
+        : ''
+      return where ? `${where}: ${msg}` : msg
+    })
+    // Duplicates are common: one bad row can trip several validators.
+    return [...new Set(parts)].join('; ')
+  }
+  return fallback || 'Request failed'
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -64,7 +94,7 @@ async function request<T>(
   const res = await fetch(`${BASE}${path}`, { ...options, headers })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new ApiError(res.status, body.detail ?? 'Request failed')
+    throw new ApiError(res.status, errorMessage(body, res.statusText))
   }
   if (res.status === 204) return undefined as T
   return res.json()
@@ -84,7 +114,7 @@ async function syncRequest<T>(path: string): Promise<T> {
   const res = await fetch(`${SYNC_BASE}${path}`, { method: 'POST', headers })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new ApiError(res.status, body.detail ?? 'Request failed')
+    throw new ApiError(res.status, errorMessage(body, res.statusText))
   }
   return res.json()
 }
@@ -523,7 +553,7 @@ export const api = {
   createDaypartingSchedule: (body: {
     profile_id: string; name: string; description?: string | null
     campaign_ids: string[]
-    entries: { day_of_week: number; hour_start: number; hour_end: number; action_type: string }[]
+    entries: import('./types').DaypartingEntryInput[]
   }) => request<import('./types').DaypartingSchedule>('/dayparting-schedules', {
     method: 'POST', body: JSON.stringify(body),
   }),
@@ -546,7 +576,15 @@ export const api = {
     request<import('./types').DaypartingRun[]>(`/dayparting-schedules/${id}/runs?limit=${limit}`),
 
   runDaypartingNow: (id: string) =>
-    request<Record<string, unknown>>(`/dayparting-schedules/${id}/run-now`, { method: 'POST' }),
+    request<{
+      dry_run: boolean
+      reason?: string
+      local_time?: string | null
+      would_set_state?: string | null
+      /** Prose describing the bid intent — a bid-only schedule has no state. */
+      would_adjust_bids?: string | null
+      checked?: number; changed?: number; skipped?: number; failed?: number
+    }>(`/dayparting-schedules/${id}/run-now`, { method: 'POST' }),
 
   // ── Rule templates ──────────────────────────────────────────────────────
 

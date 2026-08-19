@@ -470,7 +470,28 @@ export interface DaypartingEntry {
   /** exclusive — a 0-6 window means ads are back on AT 6am */
   hour_end: number
   action_type: string
+  adjust_pct?: number | null
+  min_bid?: number | null
+  max_bid?: number | null
+  /** Server-rendered convenience field; not sent when creating. */
   day_name: string
+}
+
+/** What the UI sends when creating or replacing a schedule's windows.
+ *
+ *  adjust_pct is required for decrease_bid / increase_bid and rejected for
+ *  pause / enable — the API validates both directions rather than ignoring a
+ *  field that does not apply, so a mistake in the schedule surfaces instead of
+ *  silently doing nothing every hour.
+ */
+export interface DaypartingEntryInput {
+  day_of_week: number
+  hour_start: number
+  hour_end: number
+  action_type: string
+  adjust_pct?: number | null
+  min_bid?: number | null
+  max_bid?: number | null
 }
 
 export interface DaypartingSchedule {

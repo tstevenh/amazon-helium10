@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     # error bound: a missed run means campaigns sit in the wrong state for at
     # most this long. Windows are whole hours, so 60 is the natural default.
     dayparting_interval_minutes: int = 60
+    # Ceiling on bid writes per schedule per run.
+    #
+    # Amazon has no hourly bid multiplier, so a bid window has to be written
+    # per keyword. This account has 222,384 targets; one campaign with 5,000
+    # keywords means 5,000 writes when a window opens and 5,000 more when it
+    # closes, twice a day, against a rate-limited API. The cap bounds that.
+    #
+    # Whatever the cap drops is LOGGED and recorded on the run, never silently
+    # skipped — a truncated reconcile that looked complete would be worse than
+    # a slow one. Reconciliation means the remainder is picked up next hour.
+    dayparting_max_bid_writes_per_run: int = 500
     # Daily digest cadence. 0 disables it. Not a cron expression on purpose —
     # Beat here uses plain intervals, and a fake cron would imply a wall-clock
     # guarantee this scheduler does not offer.
