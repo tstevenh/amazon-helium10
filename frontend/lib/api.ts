@@ -473,10 +473,15 @@ export const api = {
     return request<import('./types').PlacementPage>(`/performance/placements?${qs}`)
   },
 
-  kiOpportunities: (asin?: string) =>
-    request<import('./types').OpportunityBundle>(
-      '/keyword-intel/opportunities' + (asin ? `?asin=${encodeURIComponent(asin)}` : ''),
-    ),
+  /** `limit` is PER pattern. The API default used to be 50 and the table then
+   *  showed 25 of them, so a section claimed more rows than it would display. */
+  kiOpportunities: (asin?: string, limit = 200) => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    if (asin) qs.set('asin', asin)
+    return request<import('./types').OpportunityBundle>(
+      `/keyword-intel/opportunities?${qs.toString()}`,
+    )
+  },
 
   kiCompare: (myAsin: string, competitorAsin: string) =>
     request<import('./types').CompareResult>(

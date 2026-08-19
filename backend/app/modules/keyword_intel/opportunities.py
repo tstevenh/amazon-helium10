@@ -334,7 +334,16 @@ class OpportunityFinder:
 
     # ── Everything at once, for the screen ─────────────────────────────────
 
-    def all_opportunities(self, asin: Optional[str] = None) -> dict[str, Any]:
+    def all_opportunities(
+        self, asin: Optional[str] = None, limit: int = 200,
+    ) -> dict[str, Any]:
+        """Every pattern at once.
+
+        `limit` applies per pattern. It used to be a hardcoded 50, and the UI
+        then sliced to 25 while displaying the pre-slice count — so a section
+        would announce "50 found" and show half of them with no way to reach
+        the rest.
+        """
         counts = self.snapshot_counts_by_asin()
         enough = (
             max(counts.values(), default=0) >= MIN_SNAPSHOTS_FOR_TREND
@@ -348,10 +357,10 @@ class OpportunityFinder:
             # Trend patterns return [] rather than a fabricated trend when
             # there is not enough history. Reported explicitly above so the UI
             # can explain why instead of showing a bare empty list.
-            "volume_increasing": self.volume_increasing(asin) if enough else [],
-            "rank_declining": self.rank_declining(asin) if enough else [],
-            "competition_increasing": self.competition_increasing(asin) if enough else [],
+            "volume_increasing": self.volume_increasing(asin, limit=limit) if enough else [],
+            "rank_declining": self.rank_declining(asin, limit=limit) if enough else [],
+            "competition_increasing": self.competition_increasing(asin, limit=limit) if enough else [],
             # These two work from a single snapshot.
-            "missing_from_ppc": self.missing_from_ppc(),
-            "missing_from_listings": self.missing_from_listings(asin),
+            "missing_from_ppc": self.missing_from_ppc(limit=limit),
+            "missing_from_listings": self.missing_from_listings(asin, limit=limit),
         }

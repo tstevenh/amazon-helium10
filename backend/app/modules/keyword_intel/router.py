@@ -188,6 +188,8 @@ def keyword_trend(
 @router.get("/opportunities")
 def opportunities(
     asin: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000,
+                       description="Max rows PER pattern. Was hardcoded at 50."),
     db: Session = Depends(get_db),
     _u: User = Depends(get_current_user),
 ):
@@ -199,7 +201,7 @@ def opportunities(
     """
     from app.modules.keyword_intel.opportunities import OpportunityFinder
 
-    return OpportunityFinder(db).all_opportunities(asin)
+    return OpportunityFinder(db).all_opportunities(asin, limit=limit)
 
 
 @router.get("/compare")

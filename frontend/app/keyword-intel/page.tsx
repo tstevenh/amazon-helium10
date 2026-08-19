@@ -521,6 +521,184 @@ function TrendsPanel() {
  * mean anything; two work from one. That distinction is shown rather than
  * hidden, because an empty list with no explanation reads as a broken screen.
  */
+/**
+ * The opportunities tables: paginated, selectable, exportable.
+ *
+ * Previously these rendered `rows.slice(0, 25)` while the header displayed
+ * `rows.length`, so a section announced "50 found" and showed 25 with no way
+ * to reach the rest. And there was no way to get the data out at all, which
+ * makes the whole screen read-only in the least useful sense — a PPC manager
+ * wants these keywords in a bulk upload sheet, not on screen.
+ */
+function OpportunityTable({ rows }: { rows: Record<string, unknown>[] }) {
+  const columns = useMemo(
+    () => Object.keys(rows[0] ?? {}).filter(k => k !== 'keyword_id'),
+    [rows],
+  )
+  // A stable identity per row. keyword_id when the pattern provides one,
+  // otherwise the index — selection must survive a page change.
+  const idOf = (r: Record<string, unknown>, i: number) =>
+    (r.keyword_id as string) ?? `idx-${i}`
+
+  const [pageSize, setPageSize] = useState(25)
+  const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
+  const shown = rows.slice((page - 1) * pageSize, page * pageSize)
+  const allSelected = rows.length > 0 && selected.size === rows.length
+
+  function toggle(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(rows.map(idOf)))
+  }
+
+  /** Tab-separated, so a paste lands in separate columns in Excel or Sheets. */
+  function asTsv(subset: Record<string, unknown>[]) {
+    const head = columns.join('\t')
+    const body = subset.map(r =>
+      columns.map(c => (r[c] == null ? '' : String(r[c]))).join('\t'),
+    )
+    return [head, ...body].join('\n')
+  }
+
+  async function copy(subset: Record<string, unknown>[], label: string) {
+    const text = asTsv(subset)
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // clipboard API needs a secure context and permission; fall back rather
+      // than failing silently, which would look like a broken button.
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    setCopied(`${label} (${subset.length} rows)`)
+    setTimeout(() => setCopied(null), 2500)
+  }
+
+  function exportCsv(subset: Record<string, unknown>[]) {
+    // Quote every field: keyword text legitimately contains commas.
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const csv = [
+      columns.map(esc).join(','),
+      ...subset.map(r => columns.map(c => esc(r[c])).join(',')),
+    ].join('\n')
+    // BOM so Excel opens UTF-8 keyword text correctly instead of mojibake.
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `opportunities-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const selectedRows = rows.filter((r, i) => selected.has(idOf(r, i)))
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2 flex-wrap text-xs mb-2">
+        <span className="text-gray-500">
+          {selected.size > 0 ? `${selected.size} selected` : `${rows.length} rows`}
+        </span>
+        <button type="button" className="btn-secondary text-xs py-1 px-2"
+                disabled={selected.size === 0}
+                onClick={() => copy(selectedRows, 'Copied selected')}>
+          Copy selected
+        </button>
+        <button type="button" className="btn-secondary text-xs py-1 px-2"
+                onClick={() => copy(rows, 'Copied all')}>
+          Copy all
+        </button>
+        <button type="button" className="btn-secondary text-xs py-1 px-2"
+                onClick={() => exportCsv(selected.size > 0 ? selectedRows : rows)}>
+          Export CSV{selected.size > 0 ? ' (selected)' : ''}
+        </button>
+        <span className="ml-auto flex items-center gap-1 text-gray-500">
+          Rows
+          <select
+            className="input text-xs py-0.5 px-1"
+            value={pageSize}
+            onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
+          >
+            {[25, 50, 100, 500].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </span>
+      </div>
+
+      {copied && <p className="text-xs text-green-700 mb-2">{copied} — paste into Excel or Sheets.</p>}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              <th className="px-2 py-2 w-8">
+                <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                       aria-label="Select all rows" />
+              </th>
+              {columns.map(k => (
+                <th key={k} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                  {k.replace(/_/g, ' ')}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {shown.map((r, i) => {
+              const id = idOf(r, (page - 1) * pageSize + i)
+              return (
+                <tr key={id} className="hover:bg-gray-50">
+                  <td className="px-2 py-2">
+                    <input type="checkbox" checked={selected.has(id)}
+                           onChange={() => toggle(id)} aria-label="Select row" />
+                  </td>
+                  {columns.map(k => (
+                    <td key={k} className="px-3 py-2 text-gray-800">
+                      {r[k] == null ? '—' : String(r[k])}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
+          <span>
+            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, rows.length)} of {rows.length}
+          </span>
+          <span className="flex items-center gap-1">
+            <button type="button" className="btn-secondary text-xs py-1 px-2"
+                    disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+              Prev
+            </button>
+            <span>{page} / {totalPages}</span>
+            <button type="button" className="btn-secondary text-xs py-1 px-2"
+                    disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+              Next
+            </button>
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function OpportunitiesPanel() {
   const [data, setData]       = useState<OpportunityBundle | null>(null)
   const [loading, setLoading] = useState(true)
@@ -584,52 +762,38 @@ function OpportunitiesPanel() {
                 <p className="text-xs text-gray-500 mt-0.5">{sec.blurb}</p>
               </div>
               <span className="text-xs text-gray-400 shrink-0">
-                {blocked ? `needs ${needed} snapshots` : `${rows.length} found`}
+                {blocked
+                  ? `needs ${needed} dates for one ASIN`
+                  : `${rows.length} found`}
               </span>
             </div>
 
             {blocked ? (
-              <p className="text-sm text-gray-400 py-4 text-center">
-                Not enough history yet — this is not an error.
-              </p>
+              // "needs 3 snapshots" was read as "upload 3 ASINs", which
+              // produces one snapshot each and never unlocks anything. Say
+              // what is actually required: the SAME ASIN at three different
+              // snapshot dates.
+              <div className="text-sm text-gray-400 py-4 text-center space-y-1">
+                <p>Not enough history yet — this is not an error.</p>
+                <p className="text-xs">
+                  These three need the <strong>same ASIN</strong> imported at{' '}
+                  {needed} <strong>different snapshot dates</strong> (e.g. one
+                  Cerebro export for March, one for April, one for May), so there
+                  is a before and after to compare. {needed} different ASINs from
+                  the same week gives one date each and unlocks nothing.
+                </p>
+                <p className="text-xs">
+                  The date comes from the <em>Snapshot date</em> field you set when
+                  importing, not from when you uploaded the file — so you can
+                  import all three today.
+                </p>
+              </div>
             ) : rows.length === 0 ? (
               <p className="text-sm text-gray-400 py-4 text-center">
                 Nothing matched. That is a good result for this one.
               </p>
             ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      {Object.keys(rows[0])
-                        .filter(k => k !== 'keyword_id')
-                        .map(k => (
-                          <th key={k} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                            {k.replace(/_/g, ' ')}
-                          </th>
-                        ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {rows.slice(0, 25).map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        {Object.entries(r)
-                          .filter(([k]) => k !== 'keyword_id')
-                          .map(([k, v]) => (
-                            <td key={k} className="px-3 py-2 text-gray-800">
-                              {v == null ? '—' : String(v)}
-                            </td>
-                          ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {rows.length > 25 && (
-                  <p className="text-xs text-gray-400 mt-2">
-                    Showing 25 of {rows.length}.
-                  </p>
-                )}
-              </div>
+              <OpportunityTable rows={rows} />
             )}
           </div>
         )

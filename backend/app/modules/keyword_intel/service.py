@@ -141,7 +141,11 @@ class KeywordIntelService:
             self.db.add(KiSnapshotAsin(snapshot_id=snapshot.id, asin=asin))
 
         try:
-            written = self._write_rows(snapshot, parsed.rows)
+            # `asins` is what the operator typed, not what the file contained;
+            # it is the only ASIN signal for a single-product Cerebro export.
+            written = self._write_rows(
+                snapshot, parsed.rows, declared_asins=list(asins or []),
+            )
             snapshot.row_count = written
             snapshot.status = "completed"
             self.db.commit()
@@ -197,8 +201,30 @@ class KeywordIntelService:
 
         return existing
 
-    def _write_rows(self, snapshot: KiSnapshot, rows: list[dict]) -> int:
+    def _write_rows(
+        self, snapshot: KiSnapshot, rows: list[dict],
+        declared_asins: Optional[list[str]] = None,
+    ) -> int:
         keyword_ids = self._resolve_keyword_ids(rows)
+
+        # A Cerebro export for a single product has no per-row ASIN column, so
+        # r["asin"] is empty for the ordinary case and every metric row used to
+        # be stored with asin NULL — while the ASIN the operator typed went only
+        # to ki_snapshot_asins. Three consequences, all silent:
+        #
+        #   - filtering opportunities by ASIN matched nothing, because the trend
+        #     queries filter on ki_keyword_metrics.asin
+        #   - the asin column was blank in every exported row
+        #   - two products imported over the same dates would merge into one
+        #     series per keyword, comparing product A's March against product
+        #     B's May and calling it a trend
+        #
+        # So when the file carries no per-row ASIN and the operator declared
+        # exactly one, stamp it on. With several declared and no per-row column
+        # there is no honest way to attribute a row, so it stays NULL.
+        fallback_asin = None
+        if declared_asins and len(declared_asins) == 1:
+            fallback_asin = declared_asins[0].upper()
 
         # One row per (snapshot, keyword, asin) — the unique index enforces it,
         # so a duplicated line in the export must be collapsed here rather than
@@ -210,7 +236,7 @@ class KeywordIntelService:
             kid = keyword_ids.get(norm)
             if kid is None:
                 continue
-            asin = (r.get("asin") or None)
+            asin = (r.get("asin") or fallback_asin or None)
             key = (kid, asin)
             if key in seen:
                 continue
