@@ -14,10 +14,12 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
-import { X } from 'lucide-react'
+import { Eye, History, Pencil, Play, Square, Trash2, X } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import type { Campaign, DaypartingEntryInput, DaypartingSchedule, DaypartingRun } from '@/lib/types'
 import { Notice } from '@/components/ui/Notice'
+import { Button } from '@/components/ui/Button'
+import { MenuItem, MenuSeparator, RowMenu } from '@/components/ui/Menu'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -235,28 +237,41 @@ export default function DaypartingPage() {
                     {s.activated_at && ` · started ${new Date(s.activated_at).toLocaleDateString()}`}
                   </p>
                 </div>
-                <div className="flex gap-2 flex-wrap">
-                  <button onClick={() => preview(s)} className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken">
-                    What would it do now?
-                  </button>
-                  <button onClick={() => setRunsFor(s)} className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken">
-                    History
-                  </button>
-                  <button onClick={() => setEditing(s)} className="text-xs px-2.5 py-1 bg-surface border border-line rounded hover:bg-surface-sunken">
-                    Edit
-                  </button>
+                {/* Two visible actions, the rest in a menu.
+                    Delete used to sit immediately beside Activate — and Activate
+                    is the one control in this whole app that starts changing a
+                    live ad account with nobody watching. Those two should not be
+                    neighbours. Dry-run stays visible because it is what you do
+                    BEFORE activating, and Activate stays visible because hiding a
+                    consequential action in a menu is its own kind of trap. */}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button size="sm" variant="secondary" onClick={() => preview(s)}>
+                    <Eye aria-hidden />
+                    Dry run
+                  </Button>
                   {s.is_active ? (
-                    <button onClick={() => deactivate(s)} className="text-xs px-2.5 py-1 bg-surface border border-danger/20 text-danger rounded hover:bg-danger-tint">
+                    <Button size="sm" variant="danger" onClick={() => deactivate(s)}>
+                      <Square aria-hidden />
                       Stop
-                    </button>
+                    </Button>
                   ) : (
-                    <button onClick={() => activate(s)} className="text-xs px-2.5 py-1 bg-accent text-white rounded hover:bg-accent-hover">
+                    <Button size="sm" variant="primary" onClick={() => activate(s)}>
+                      <Play aria-hidden />
                       Activate
-                    </button>
+                    </Button>
                   )}
-                  <button onClick={() => remove(s)} className="text-xs px-2 py-1 bg-surface border border-danger/20 text-danger rounded hover:bg-danger-tint">
-                    <X size={14} aria-hidden />
-                  </button>
+                  <RowMenu label={`Actions for ${s.name}`}>
+                    <MenuItem onSelect={() => setEditing(s)}>
+                      <Pencil aria-hidden /> Edit schedule
+                    </MenuItem>
+                    <MenuItem onSelect={() => setRunsFor(s)}>
+                      <History aria-hidden /> Run history
+                    </MenuItem>
+                    <MenuSeparator />
+                    <MenuItem danger onSelect={() => remove(s)}>
+                      <Trash2 aria-hidden /> Delete schedule
+                    </MenuItem>
+                  </RowMenu>
                 </div>
               </div>
               <ScheduleGridPreview schedule={s} />

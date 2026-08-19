@@ -20,6 +20,7 @@ import type {
   OpportunityBundle, CompareResult,
 } from '@/lib/types'
 import { Notice } from '@/components/ui/Notice'
+import { StatBar } from '@/components/ui/StatBar'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -76,19 +77,19 @@ export default function KeywordIntelPage() {
       />
 
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: 'Snapshots', value: stats.snapshots.toLocaleString() },
-            { label: 'Keywords tracked', value: stats.keywords.toLocaleString() },
-            { label: 'ASINs covered', value: stats.asins.toLocaleString() },
-            { label: 'History span', value: monthsOfHistory > 0 ? `${monthsOfHistory} mo` : '—' },
-          ].map(s => (
-            <div key={s.label} className="rounded-xl border border-hairline bg-surface p-4">
-              <p className="text-xs text-ink-muted">{s.label}</p>
-              <p className="text-xl font-bold text-ink mt-1">{s.value}</p>
-            </div>
-          ))}
-        </div>
+        <StatBar
+          stats={[
+            { label: 'Snapshots', value: stats.snapshots.toLocaleString(),
+              // Three per ASIN is the threshold that unlocks the trend patterns,
+              // so the count is only meaningful next to it.
+              hint: stats.snapshots < 3 ? 'need 3 per ASIN for trends' : undefined,
+              tone: stats.snapshots < 3 ? 'warn' : undefined },
+            { label: 'Keywords', value: stats.keywords.toLocaleString(), hint: 'tracked' },
+            { label: 'ASINs',    value: stats.asins.toLocaleString(),    hint: 'covered' },
+            { label: 'History',  value: monthsOfHistory > 0 ? monthsOfHistory : '—',
+              hint: monthsOfHistory > 0 ? 'months' : undefined },
+          ]}
+        />
       )}
 
       {/* The spec's own advice, stated where it matters rather than buried. */}

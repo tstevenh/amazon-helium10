@@ -15,6 +15,7 @@ import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
 import type { CampaignWithMetrics, SyncJobRow, Suggestion, Anomaly } from '@/lib/types'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { StatBar } from '@/components/ui/StatBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { fmt } from '@/components/ui/metricColumns'
@@ -195,23 +196,20 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Money */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        {[
+      {/* ACOS is the only figure here whose direction is good or bad on its own —
+          spend of $45 is neither — so it is the only one that takes a tone. */}
+      <StatBar
+        stats={[
           { label: 'Spend',  value: fmt.currency(kpis.spend) },
           { label: 'Sales',  value: fmt.currency(kpis.sales) },
           { label: 'ACOS',   value: fmt.acos(kpis.acos),
-            cls: kpis.acos == null ? '' : kpis.acos > 40 ? 'text-danger' : kpis.acos > 25 ? 'text-warn' : 'text-ok' },
+            tone: kpis.acos == null ? undefined
+              : kpis.acos > 40 ? 'danger' : kpis.acos > 25 ? 'warn' : 'ok' },
           { label: 'ROAS',   value: fmt.roas(kpis.roas) },
           { label: 'Orders', value: fmt.int(kpis.orders) },
           { label: 'Clicks', value: fmt.int(kpis.clicks) },
-        ].map(k => (
-          <div key={k.label} className="rounded-xl border border-hairline bg-surface p-4">
-            <p className="text-xs text-ink-muted">{k.label}</p>
-            <p className={`text-xl font-bold mt-1 ${k.cls ?? 'text-ink'}`}>{k.value}</p>
-          </div>
-        ))}
-      </div>
+        ]}
+      />
 
       {/* Waiting on a human */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
