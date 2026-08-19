@@ -213,6 +213,7 @@ export default function AdGroupsPage() {
           rowKey={r => r.id}
           onRowClick={r => router.push(`/ad-groups/${r.id}`)}
           rowHref={r => `/ad-groups/${r.id}`}
+          resizeKey="ad-groups"
           loading={isLoading}
           emptyTitle="No ad groups found"
           emptyDescription={

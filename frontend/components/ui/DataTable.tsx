@@ -2,6 +2,7 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Pagination } from './Pagination'
+import { useColumnWidths } from './useColumnWidths'
 import { LoadingState } from './LoadingState'
 import { EmptyState } from './EmptyState'
 
@@ -41,6 +42,11 @@ interface DataTableProps<T> {
   sortCol?: number | null
   sortDir?: SortDir
   onSortChange?: (col: number | null, dir: SortDir) => void
+  /**
+   * Enables Excel-style column resizing, remembered under this key.
+   * Omit it and the table behaves exactly as before.
+   */
+  resizeKey?: string
   pageSize?: number
   loading?: boolean
   emptyTitle?: string
@@ -59,6 +65,7 @@ export function DataTable<T>({
   sortCol: sortColProp,
   sortDir: sortDirProp,
   onSortChange,
+  resizeKey,
   pageSize = 25,
   loading = false,
   emptyTitle = 'No records found',
@@ -74,6 +81,9 @@ export function DataTable<T>({
   const sortCol = controlled ? (sortColProp ?? null) : ownSortCol
   const sortDir = controlled ? (sortDirProp ?? 'asc') : ownSortDir
   const [page, setPage] = useState(1)
+  // Declared before the early returns below: a hook after them would run on
+  // some renders and not others, which is the crash this file has seen before.
+  const cols = useColumnWidths(resizeKey ?? 'unused', columns.length)
 
   const sorted = useMemo(() => {
     if (sortCol === null || !columns[sortCol]?.sortValue) return rows
@@ -132,8 +142,10 @@ export function DataTable<T>({
   return (
     <div className={`overflow-hidden ${className}`}>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
+        <table className="min-w-full divide-y divide-gray-200 text-sm"
+               style={resizeKey ? cols.tableStyle : undefined}>
+          {resizeKey && cols.colGroup}
+          <thead className="bg-gray-50" ref={resizeKey ? cols.theadRef : undefined}>
             <tr>
               {columns.map((col, i) => (
                 <th
@@ -142,7 +154,7 @@ export function DataTable<T>({
                   onClick={() => toggleSort(i)}
                   className={`px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap select-none ${
                     col.sortValue ? 'cursor-pointer hover:text-gray-700' : ''
-                  } ${col.className ?? ''}`}
+                  } ${resizeKey ? 'relative' : ''} ${col.className ?? ''}`}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.header}
@@ -155,6 +167,9 @@ export function DataTable<T>({
                       <span className="text-gray-300">↕</span>
                     )}
                   </span>
+                  {/* Last column gets no handle: dragging it would widen the
+                      table past its container with nothing to give back. */}
+                  {resizeKey && i < columns.length - 1 && cols.handle(i)}
                 </th>
               ))}
             </tr>
@@ -169,7 +184,10 @@ export function DataTable<T>({
                 }`}
               >
                 {columns.map((col, i) => (
-                  <td key={i} className={`px-4 py-3 ${col.className ?? ''}`}>
+                  <td key={i}
+                      className={`px-4 py-3 ${resizeKey ? 'truncate' : ''} ${col.className ?? ''}`}
+                      title={resizeKey && typeof col.cell(row) === 'string'
+                        ? String(col.cell(row)) : undefined}>
                     {i === 0 && rowHref ? (
                       // stopPropagation so the anchor does not also fire the
                       // row handler, which would navigate twice.

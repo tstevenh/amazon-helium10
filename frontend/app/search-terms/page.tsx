@@ -2,10 +2,11 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUrlState } from '@/lib/useUrlState'
+import { useColumnWidths } from '@/components/ui/useColumnWidths'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
 import { api, ApiError } from '@/lib/api'
-import { SearchTermRow, Campaign } from '@/lib/types'
+import { SearchTermRow, Campaign, AdGroup } from '@/lib/types'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ const SEARCH_TERM_DEFAULTS = {
   date_from: '',
   date_to: '',
   campaign: '',
+  ad_group: '',
   min_spend: '',
   min_sales: '',
   max_acos: '',
@@ -87,6 +89,7 @@ export default function SearchTermsPage() {
   const dateFrom = urlState.date_from || daysAgo(30)
   const dateTo = urlState.date_to || today()
   const campaignId = urlState.campaign
+  const adGroupId = urlState.ad_group
   const minSpend = urlState.min_spend
   const minSales = urlState.min_sales
   const maxAcos = urlState.max_acos
@@ -94,7 +97,10 @@ export default function SearchTermsPage() {
   const activePreset = urlState.preset
   const setDateFrom = (v: string) => setUrlState({ date_from: v, preset: '' })
   const setDateTo = (v: string) => setUrlState({ date_to: v, preset: '' })
-  const setCampaignId = (v: string) => setUrlState({ campaign: v })
+  // Changing campaign clears the ad group: an ad group from another campaign
+  // would silently filter everything out and look like "no data".
+  const setCampaignId = (v: string) => setUrlState({ campaign: v, ad_group: '' })
+  const setAdGroupId = (v: string) => setUrlState({ ad_group: v })
   const setMinSpend = (v: string) => setUrlState({ min_spend: v })
   const setMinSales = (v: string) => setUrlState({ min_sales: v })
   const setMaxAcos = (v: string) => setUrlState({ max_acos: v })
@@ -103,6 +109,9 @@ export default function SearchTermsPage() {
   // data
   const [rows,      setRows]      = useState<SearchTermRow[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [adGroups, setAdGroups] = useState<AdGroup[]>([])
+  // 12 columns, matching the header array below.
+  const cols = useColumnWidths('search-terms', 12)
   const [loading,   setLoading]   = useState(false)
   const [syncing,   setSyncing]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
@@ -133,7 +142,18 @@ export default function SearchTermsPage() {
         : data.filter(c => accountProfileIds.has(c.profile_id))
       setCampaigns(filtered)
     }).catch(() => {})
+    api.listAdGroups().then(setAdGroups).catch(() => {})
   }, [currentAccountId, currentProfileId, accountProfileIds])
+
+  // Only the ad groups that belong to the chosen campaign. Listing every ad
+  // group in the marketplace would be hundreds of entries with no way to tell
+  // which campaign each came from.
+  const visibleAdGroups = useMemo(() => {
+    const inScope = new Set(campaigns.map(c => c.id))
+    return adGroups
+      .filter(g => (campaignId ? g.campaign_id === campaignId : inScope.has(g.campaign_id)))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [adGroups, campaigns, campaignId])
 
   const load = useCallback(async () => {
     if (!profileIds.length || accountsLoading || profilesLoading) return
@@ -148,6 +168,7 @@ export default function SearchTermsPage() {
           date_from: dateFrom,
           date_to: dateTo,
           campaign_id: campaignId || undefined,
+          ad_group_id: adGroupId || undefined,
           min_spend: minSpend ? parseFloat(minSpend) : undefined,
           min_sales: minSales ? parseFloat(minSales) : undefined,
           max_acos:  maxAcos  ? parseFloat(maxAcos) / 100 : undefined,
@@ -162,7 +183,7 @@ export default function SearchTermsPage() {
     } finally {
       setLoading(false)
     }
-  }, [profileIds, accountsLoading, profilesLoading, dateFrom, dateTo, campaignId, minSpend, minSales, maxAcos, search])
+  }, [profileIds, accountsLoading, profilesLoading, dateFrom, dateTo, campaignId, adGroupId, minSpend, minSales, maxAcos, search])
 
   useEffect(() => {
     if (user && !accountsLoading && profileIds.length) load()
@@ -281,6 +302,16 @@ export default function SearchTermsPage() {
             </select>
           </div>
           <div>
+            <label className="label">Ad Group</label>
+            <select value={adGroupId} onChange={e => setAdGroupId(e.target.value)}
+                    className="input text-sm max-w-[180px]">
+              <option value="">All Ad Groups</option>
+              {visibleAdGroups.map(g => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="label">Min Spend ($)</label>
             <input type="number" min="0" step="0.01" value={minSpend}
               onChange={e => setMinSpend(e.target.value)}
@@ -330,12 +361,14 @@ export default function SearchTermsPage() {
       {/* Table */}
       {!noContext && !noProfiles && (
         <div className="card p-0 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
+          <table className="w-full text-sm" style={cols.tableStyle}>
+            {cols.colGroup}
+            <thead ref={cols.theadRef}>
               <tr className="border-b border-gray-200 bg-gray-50">
                 {[
                   { label: 'Search Term',  key: 'search_term' as SortKey, cls: 'text-left w-56' },
                   { label: 'Campaign',     key: '' as SortKey,            cls: 'text-left w-40' },
+                  { label: 'Ad Group',     key: '' as SortKey,            cls: 'text-left w-40' },
                   { label: 'Impressions',  key: 'impressions' as SortKey, cls: 'text-right' },
                   { label: 'Clicks',       key: 'clicks' as SortKey,      cls: 'text-right' },
                   { label: 'Spend',        key: 'cost' as SortKey,        cls: 'text-right' },
@@ -345,21 +378,22 @@ export default function SearchTermsPage() {
                   { label: 'ROAS',         key: 'roas' as SortKey,        cls: 'text-right' },
                   { label: 'CTR',          key: 'ctr' as SortKey,         cls: 'text-right' },
                   { label: 'CVR',          key: 'conversion_rate' as SortKey, cls: 'text-right' },
-                ].map(col => (
+                ].map((col, i, arr) => (
                   <th key={col.label}
-                    className={`px-3 py-2.5 text-xs font-semibold text-gray-600 whitespace-nowrap ${col.cls} ${col.key ? 'cursor-pointer hover:bg-gray-100' : ''}`}
+                    className={`relative px-3 py-2.5 text-xs font-semibold text-gray-600 whitespace-nowrap ${col.cls} ${col.key ? 'cursor-pointer hover:bg-gray-100' : ''}`}
                     onClick={() => col.key && handleSort(col.key)}
                   >
                     {col.label}{col.key && <SortIndicator k={col.key} />}
+                    {i < arr.length - 1 && cols.handle(i)}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={11} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">Loading…</td></tr>
               ) : pageRows.length === 0 ? (
-                <tr><td colSpan={11} className="px-4 py-12 text-center text-gray-400">
+                <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">
                   No search terms found. Run Sync Search Terms to import data.
                 </td></tr>
               ) : pageRows.map((row, i) => {
@@ -374,6 +408,12 @@ export default function SearchTermsPage() {
                     </td>
                     <td className="px-3 py-2.5 text-gray-500 max-w-[160px] truncate" title={row.campaign_name ?? ''}>
                       {row.campaign_name ?? '—'}
+                    </td>
+                    {/* Rows were already grouped per ad group, but only the
+                        campaign was shown — so the same search term in two ad
+                        groups looked like a duplicated row. */}
+                    <td className="px-3 py-2.5 text-gray-500 max-w-[160px] truncate" title={row.ad_group_name ?? ''}>
+                      {row.ad_group_name ?? '—'}
                     </td>
                     <td className="px-3 py-2.5 text-right text-gray-700">{row.impressions.toLocaleString()}</td>
                     <td className="px-3 py-2.5 text-right text-gray-700">{row.clicks.toLocaleString()}</td>

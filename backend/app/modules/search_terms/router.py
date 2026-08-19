@@ -31,6 +31,9 @@ def list_search_terms(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     campaign_id: Optional[uuid.UUID] = Query(None),
+    ad_group_id: Optional[uuid.UUID] = Query(
+        None, description="Amazon reports search terms per ad group, and one "
+                    "campaign's ad groups can target different keywords."),
     min_spend: Optional[float] = Query(None, ge=0),
     min_sales: Optional[float] = Query(None, ge=0),
     max_acos: Optional[float] = Query(None, ge=0),
@@ -47,6 +50,7 @@ def list_search_terms(
         date_from=df,
         date_to=dt,
         campaign_id=campaign_id,
+        ad_group_id=ad_group_id,
         min_spend=min_spend,
         min_sales=min_sales,
         max_acos=max_acos,

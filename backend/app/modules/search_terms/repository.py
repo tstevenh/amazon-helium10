@@ -43,6 +43,7 @@ class SearchTermRepository:
         date_from: date,
         date_to: date,
         campaign_id: Optional[uuid.UUID] = None,
+        ad_group_id: Optional[uuid.UUID] = None,
         min_spend: Optional[float] = None,
         min_sales: Optional[float] = None,
         max_acos: Optional[float] = None,
@@ -58,6 +59,13 @@ class SearchTermRepository:
         if campaign_id:
             filters.append("st.campaign_id = :campaign_id")
             params["campaign_id"] = str(campaign_id)
+        # Amazon exposes search terms at ad-group level, and so does this table:
+        # rows are already grouped per (search_term, campaign, ad_group). One
+        # campaign's ad groups can target completely different keywords and
+        # ASINs, so filtering by campaign alone mixes them together.
+        if ad_group_id:
+            filters.append("st.ad_group_id = :ad_group_id")
+            params["ad_group_id"] = str(ad_group_id)
         if q:
             filters.append("st.search_term ILIKE :q")
             params["q"] = f"%{q}%"

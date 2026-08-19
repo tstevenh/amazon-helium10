@@ -370,6 +370,7 @@ export default function CampaignsPage() {
           rowKey={r => r.id}
           onRowClick={r => router.push(`/campaigns/${r.id}`)}
           rowHref={r => `/campaigns/${r.id}`}
+          resizeKey="campaigns"
           loading={isLoading}
           emptyTitle="No campaigns found"
           emptyDescription={

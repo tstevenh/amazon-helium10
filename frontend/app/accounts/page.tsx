@@ -283,6 +283,7 @@ export default function AccountsPage() {
           rowKey={r => r.id}
           onRowClick={r => router.push(`/accounts/${r.id}`)}
           rowHref={r => `/accounts/${r.id}`}
+          resizeKey="accounts"
           loading={dataLoading}
           emptyTitle="No accounts"
           emptyDescription={

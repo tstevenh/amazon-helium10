@@ -14,6 +14,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { api, ApiError } from '@/lib/api'
+import { useColumnWidths } from '@/components/ui/useColumnWidths'
 import type {
   KiStats, KiSnapshot, KiInspectResult, KiKeywordHit, KiTrendPoint,
   OpportunityBundle, CompareResult,
@@ -633,6 +634,10 @@ function ExportableTable({ rows }: { rows: Record<string, unknown>[] }) {
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [copied, setCopied] = useState<string | null>(null)
+  // +1 for the checkbox column. Keyed on the column set rather than the screen,
+  // so the Opportunities shapes and the snapshot shape keep separate widths
+  // instead of one overwriting the other.
+  const colw = useColumnWidths(`ki:${columns.join(',')}`, columns.length + 1)
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
   const shown = rows.slice((page - 1) * pageSize, page * pageSize)
@@ -731,16 +736,20 @@ function ExportableTable({ rows }: { rows: Record<string, unknown>[] }) {
       {copied && <p className="text-xs text-green-700 mb-2">{copied} — paste into Excel or Sheets.</p>}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
+        <table className="w-full text-sm" style={colw.tableStyle}>
+          {colw.colGroup}
+          <thead ref={colw.theadRef}>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="px-2 py-2 w-8">
                 <input type="checkbox" checked={allSelected} onChange={toggleAll}
                        aria-label="Select all rows" />
               </th>
-              {columns.map(k => (
-                <th key={k} className="px-3 py-2 text-left text-xs font-semibold text-gray-600">
+              {columns.map((k, i) => (
+                <th key={k}
+                    className="relative px-3 py-2 text-left text-xs font-semibold text-gray-600">
                   {k.replace(/_/g, ' ')}
+                  {/* +1 for the checkbox column, which is not resizable. */}
+                  {i < columns.length - 1 && colw.handle(i + 1)}
                 </th>
               ))}
             </tr>

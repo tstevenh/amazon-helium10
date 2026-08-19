@@ -314,6 +314,7 @@ export default function CampaignDetailPage() {
           rowKey={r => r.id}
           onRowClick={r => router.push(`/ad-groups/${r.id}`)}
           rowHref={r => `/ad-groups/${r.id}`}
+          resizeKey="campaign-detail-adgroups"
           emptyTitle="No ad groups"
           emptyDescription={search ? 'No ad groups match your search.' : 'No ad groups found for this campaign.'}
         />

@@ -265,12 +265,16 @@ export const api = {
     min_sales?: number
     max_acos?: number
     q?: string
+    /** Amazon reports search terms per ad group, and one campaign's ad groups
+     *  can target completely different keywords and ASINs. */
+    ad_group_id?: string
   }) => {
     const qs = new URLSearchParams()
     qs.set('profile_id', params.profile_id)
     if (params.date_from)   qs.set('date_from',   params.date_from)
     if (params.date_to)     qs.set('date_to',     params.date_to)
     if (params.campaign_id) qs.set('campaign_id', params.campaign_id)
+    if (params.ad_group_id) qs.set('ad_group_id', params.ad_group_id)
     if (params.min_spend != null) qs.set('min_spend', String(params.min_spend))
     if (params.min_sales != null) qs.set('min_sales', String(params.min_sales))
     if (params.max_acos  != null) qs.set('max_acos',  String(params.max_acos))

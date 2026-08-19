@@ -256,6 +256,7 @@ export default function KeywordsPage() {
         <DataTable
           columns={columns}
           rows={filtered}
+          resizeKey="keywords"
           sortCol={sortCol}
           sortDir={sortDir}
           onSortChange={(col, dir) =>
