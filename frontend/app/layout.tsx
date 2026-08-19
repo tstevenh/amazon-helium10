@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50">
+      <body className="min-h-screen bg-canvas">
         <AuthProvider>
           <AccountProfileProvider>
             {/* Sticky global header: account/profile selectors + user menu */}
@@ -24,11 +24,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
              */}
             <div className="flex min-h-[calc(100vh-3.5rem)]">
               <SideNav />
-              <main className="flex-1 min-w-0 px-6 py-6">
-                <div className="max-w-6xl mx-auto">
-                  {children}
-                </div>
-              </main>
+              {/* No max-width cap: these tables have up to 15 numeric columns,
+                  and a 1152px centred column forced them to scroll sideways
+                  while empty space sat to the right. Prose inside a screen is
+                  capped where it matters instead. */}
+              <main className="min-w-0 flex-1 px-5 py-5">{children}</main>
             </div>
           </AccountProfileProvider>
         </AuthProvider>

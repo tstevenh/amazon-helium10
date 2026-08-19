@@ -10,6 +10,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { DataTable, Column, SortDir } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SearchBox } from '@/components/ui/SearchBox'
+import { Card } from '@/components/ui/Card'
+import { StatBar } from '@/components/ui/StatBar'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Input } from '@/components/ui/Field'
 import { FilterBar, FilterConfig } from '@/components/ui/FilterBar'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { ErrorState } from '@/components/ui/ErrorState'
@@ -285,7 +289,7 @@ export default function CampaignsPage() {
   return (
     <div>
       <PageHeader
-        title="Campaign Manager"
+        title="Campaigns"
         subtitle={
           isLoading
             ? 'Loading…'
@@ -293,61 +297,61 @@ export default function CampaignsPage() {
         }
       />
 
-      {/* Toolbar: date range picker */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex rounded-md border border-gray-200 overflow-hidden text-xs">
-          {presets.map(p => (
-            <button
-              key={p}
-              onClick={() => { const d = datesForPreset(p); setDateRange(d.date_from, d.date_to) }}
-              className={`px-3 py-1.5 whitespace-nowrap transition-colors ${
-                activePreset === p ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {presetLabels[p]}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1">
-          <input
+      {/* Date range. A preset and an explicit range are the same setting, so they
+          sit together with the presets first — nine times out of ten one click
+          is the whole interaction. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <SegmentedControl
+          ariaLabel="Date range preset"
+          value={activePreset}
+          onChange={p => { const d = datesForPreset(p); setDateRange(d.date_from, d.date_to) }}
+          options={presets.map(p => ({ value: p, label: presetLabels[p] }))}
+        />
+        <div className="flex items-center gap-1.5">
+          <Input
             type="date"
             value={dateFrom}
             max={dateTo}
             onChange={e => setDateRange(e.target.value, dateTo)}
-            className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
+            aria-label="From date"
+            className="w-[8.5rem] text-xs"
           />
-          <span className="text-xs text-gray-400">–</span>
-          <input
+          <span className="text-xs text-ink-faint" aria-hidden>–</span>
+          <Input
             type="date"
             value={dateTo}
             min={dateFrom}
             max={isoDate(new Date())}
             onChange={e => setDateRange(dateFrom, e.target.value)}
-            className="border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
+            aria-label="To date"
+            className="w-[8.5rem] text-xs"
           />
         </div>
       </div>
 
-      {/* KPI strip — the spec says this replaces a standalone Dashboard in V1.
-          Totals come from `filtered`, so they always match the table below. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
-        {[
+      {/* Totals for the rows currently shown, so they always agree with the
+          table below rather than describing some wider set. */}
+      <StatBar
+        stats={[
           { label: 'Spend',  value: fmt.currency(kpis.spend) },
           { label: 'Sales',  value: fmt.currency(kpis.sales) },
           { label: 'ACOS',   value: kpis.acos == null ? '—' : `${kpis.acos.toFixed(1)}%` },
           { label: 'ROAS',   value: kpis.roas == null ? '—' : `${kpis.roas.toFixed(2)}×` },
           { label: 'Clicks', value: kpis.clicks.toLocaleString() },
-          { label: 'Orders', value: kpis.orders.toLocaleString() },
-        ].map(k => (
-          <div key={k.label} className="rounded-xl border border-gray-200 bg-white p-3.5">
-            <p className="text-xs text-gray-500 truncate">{k.label}</p>
-            <p className="text-xl font-bold text-gray-900 mt-1 truncate">{k.value}</p>
-          </div>
-        ))}
-      </div>
+          { label: 'Orders', value: kpis.orders.toLocaleString(),
+            // Orders is the only figure here that is a count of outcomes rather
+            // than a rate or a sum, so it carries what it is a count of.
+            hint: 'in range' },
+        ]}
+      />
 
-      <div className="card overflow-x-auto">
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+      {/* Card, not `card overflow-x-auto`: DataTable owns its own horizontal
+          scroller, and nesting a second one produced two scrollbars where the
+          outer clipped the inner. The filter row is padded; the table runs
+          edge to edge, because a table inset from its own border reads as a
+          picture of a table. */}
+      <Card>
+        <div className="flex flex-col gap-3 border-b border-hairline p-3 sm:flex-row">
           <SearchBox
             value={search}
             onChange={setSearch}
@@ -380,7 +384,7 @@ export default function CampaignsPage() {
                                    currentProfileId, accountName: currentAccount?.name }).message
           }
         />
-      </div>
+      </Card>
     </div>
   )
 }

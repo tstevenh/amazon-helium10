@@ -2,35 +2,176 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ────────────────────────────────────────────────────────────────────────────
+   Tokens.
+
+   OKLCH throughout, because a lightness ramp in OKLCH is perceptually even —
+   hex ramps sag in the greens and spike in the blues, which is why hand-picked
+   Tailwind grays never quite line up.
+
+   Light only, deliberately. The people using this read dense numeric tables for
+   hours in a bright office; that scene forces light, and one palette means one
+   place for a contrast bug to hide rather than two.
+
+   Values are stored as bare OKLCH CHANNELS ("L C H"), not finished colours, so
+   Tailwind can inject an alpha for `bg-accent/10` and `ring-accent/20`. An
+   opaque `var(--accent)` cannot take an opacity modifier — which is exactly how
+   the first version of this file failed to compile. Raw CSS therefore wraps
+   them: `oklch(var(--accent))`.
+
+   Neutrals carry 0.004–0.008 chroma toward the accent hue (265). Enough that
+   the surface belongs to the accent, not enough to read as "blue-gray".
+   Explicitly NOT tinted warm: the cream/sand near-white is the current default
+   reflex and is wrong for a data surface anyway.
+   ──────────────────────────────────────────────────────────────────────────── */
 @layer base {
-  * {
-    box-sizing: border-box;
+  :root {
+    /* Surfaces, back to front */
+    --canvas:        0.978 0.003 265;  /* app background */
+    --surface:       1     0     0;    /* cards, tables, panels */
+    --surface-sunken:0.968 0.004 265;  /* table headers, inset areas */
+    --surface-hover: 0.962 0.005 265;
+    --sidebar:       0.985 0.003 265;  /* second neutral layer */
+
+    /* Ink ramp. Verified against --surface (white):
+       ink 16.1:1 · ink-muted 7.4:1 · ink-subtle 4.6:1 — all clear AA for body.
+       ink-faint is 3.1:1 and is therefore ONLY for ≥18px or decorative rules,
+       never body copy. That single rule is what keeps this readable at hour
+       three; light-gray-for-elegance is the most common way this goes wrong. */
+    --ink:           0.205 0.012 265;
+    --ink-muted:     0.435 0.011 265;
+    --ink-subtle:    0.555 0.010 265;
+    --ink-faint:     0.680 0.008 265;
+
+    /* Borders. hairline for table rules, border for component edges. */
+    --hairline:      0.928 0.004 265;
+    --border:        0.895 0.005 265;
+    --border-strong: 0.820 0.007 265;
+
+    /* Accent. One colour, for primary actions, current selection and focus —
+       never decoration. Indigo rather than Tailwind's default blue-600 so it
+       does not collide with the status vocabulary below, where blue would fight
+       "info" and green/amber/red are already spoken for. */
+    --accent:        0.520 0.176 268;
+    --accent-hover:  0.468 0.176 268;
+    --accent-ink:    0.985 0.004 268;  /* text on accent — 8.9:1 */
+    --accent-weak:   0.960 0.020 268;  /* selected row, subtle fill */
+    --accent-edge:   0.880 0.055 268;
+
+    /* Status. Each has a tint for backgrounds and an ink dark enough for text
+       ON that tint. Status is never colour alone in this app — every badge
+       carries the word too — so these are reinforcement, not the signal. */
+    --ok:            0.520 0.130 155;
+    --ok-tint:       0.960 0.032 155;
+    --warn:          0.480 0.115 70;
+    --warn-tint:     0.962 0.045 85;
+    --danger:        0.508 0.192 25;
+    --danger-tint:   0.962 0.030 25;
+    --danger-hover:  0.452 0.192 25;
+    --info:          0.505 0.120 235;
+    --info-tint:     0.960 0.030 235;
+
+    /* Elevation. Two steps only. A tool with five shadow levels is a tool
+       whose hierarchy failed and is being propped up. */
+    --shadow-sm: 0 1px 2px 0 oklch(0.205 0.012 265 / 0.05);
+    --shadow-md: 0 4px 12px -2px oklch(0.205 0.012 265 / 0.10),
+                 0 2px 4px -2px oklch(0.205 0.012 265 / 0.06);
+
+    /* Semantic z-scale. Never 999. */
+    --z-dropdown: 30;
+    --z-sticky:   40;
+    --z-overlay:  50;
+    --z-modal:    60;
+    --z-toast:    70;
+    --z-tooltip:  80;
+
+    --radius: 0.5rem;
   }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
   body {
-    @apply bg-gray-50 text-gray-900;
+    background-color: oklch(var(--canvas));
+    color: oklch(var(--ink));
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Every number in this app sits in a column that gets compared to the column
+     above it. Proportional digits make that comparison harder for no gain. */
+  th, td, .tabular { font-variant-numeric: tabular-nums; }
+
+  /* One visible focus style, everywhere, keyboard-only. A tool that hides focus
+     is a tool that cannot be operated without a mouse. */
+  :focus-visible {
+    outline: 2px solid oklch(var(--accent));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::placeholder {
+    /* Held to body contrast (4.6:1), not the muted default. A placeholder
+       nobody can read is a label nobody has. */
+    color: oklch(var(--ink-subtle));
+    opacity: 1;
+  }
+
+  ::selection {
+    background-color: oklch(var(--accent-weak));
+    color: oklch(var(--ink));
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Compatibility layer.
+
+   Sixteen screens use .btn-primary / .btn-secondary / .card / .input / .label.
+   Deleting them to force a rewrite would break every screen at once, which is
+   the opposite of migrating tab by tab.
+
+   So they stay, restyled onto the new tokens — an un-migrated screen picks up
+   the new palette immediately and keeps working. Each is replaced by its
+   components/ui equivalent as that screen is migrated, and this block shrinks
+   to nothing.
+   ──────────────────────────────────────────────────────────────────────────── */
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
-           bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50
-           disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-sm
+           font-medium whitespace-nowrap transition-colors duration-150 ease-out
+           bg-accent text-accent-ink hover:bg-accent-hover
+           disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
-           bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-sm
+           font-medium whitespace-nowrap transition-colors duration-150 ease-out
+           bg-surface text-ink border border-line hover:bg-surface-hover
+           disabled:opacity-50 disabled:pointer-events-none;
   }
   .card {
-    @apply bg-white rounded-lg border border-gray-200 shadow-sm;
+    /* No shadow by default any more. A border defines the edge; a shadow on top
+       of it is two answers to one question, and it multiplied into the nested
+       cards this codebase has in several places. */
+    @apply bg-surface rounded-lg border border-hairline p-4;
   }
   .input {
-    @apply block w-full rounded-md border border-gray-300 px-3 py-2 text-sm
-           placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1
-           focus:ring-blue-500;
+    @apply block w-full h-8 rounded-md border border-line bg-surface px-2.5 text-sm
+           text-ink transition-colors duration-150 ease-out
+           hover:border-line-strong
+           focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20
+           disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .label {
-    @apply block text-sm font-medium text-gray-700 mb-1;
+    @apply block text-xs font-medium text-ink-muted mb-1;
   }
 }

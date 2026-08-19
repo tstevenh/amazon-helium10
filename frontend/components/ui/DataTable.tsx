@@ -1,6 +1,8 @@
 'use client'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { ChevronDown, ChevronsUpDown, ChevronUp, Columns3 } from 'lucide-react'
+import { cn } from '@/lib/cn'
 import { Pagination } from './Pagination'
 import { useColumnWidths } from './useColumnWidths'
 import { LoadingState } from './LoadingState'
@@ -142,29 +144,39 @@ export function DataTable<T>({
   return (
     <div className={`overflow-hidden ${className}`}>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm"
+        <table className="min-w-full text-sm"
                style={resizeKey ? cols.tableStyle : undefined}>
           {resizeKey && cols.colGroup}
-          <thead className="bg-gray-50" ref={resizeKey ? cols.theadRef : undefined}>
+          <thead className="border-b border-hairline bg-surface-sunken" ref={resizeKey ? cols.theadRef : undefined}>
             <tr>
               {columns.map((col, i) => (
                 <th
                   key={i}
                   scope="col"
                   onClick={() => toggleSort(i)}
-                  className={`px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap select-none ${
-                    col.sortValue ? 'cursor-pointer hover:text-gray-700' : ''
-                  } ${resizeKey ? 'relative' : ''} ${col.className ?? ''}`}
+                  className={cn(
+                    'group/th px-3 py-2 text-left text-xs font-medium text-ink-muted',
+                    'whitespace-nowrap select-none',
+                    col.sortValue && 'cursor-pointer hover:text-ink',
+                    resizeKey && 'relative',
+                    col.className,
+                  )}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.header}
-                    {col.sortValue && sortCol === i && (
-                      <span className="text-blue-500">
-                        {sortDir === 'asc' ? '↑' : '↓'}
-                      </span>
-                    )}
-                    {col.sortValue && sortCol !== i && (
-                      <span className="text-gray-300">↕</span>
+                    {col.sortValue && (
+                      sortCol === i ? (
+                        sortDir === 'asc'
+                          ? <ChevronUp size={13} strokeWidth={2.25} className="text-accent" aria-hidden />
+                          : <ChevronDown size={13} strokeWidth={2.25} className="text-accent" aria-hidden />
+                      ) : (
+                        // Shown only on hover: eleven permanent double-chevrons
+                        // is eleven pieces of chrome competing with the data.
+                        <ChevronsUpDown
+                          size={13} strokeWidth={2} aria-hidden
+                          className="text-ink-faint opacity-0 transition-opacity group-hover/th:opacity-100"
+                        />
+                      )
                     )}
                   </span>
                   {/* Last column gets no handle: dragging it would widen the
@@ -174,18 +186,19 @@ export function DataTable<T>({
               ))}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-100">
+          <tbody className="divide-y divide-hairline bg-surface">
             {paginated.map(row => (
               <tr
                 key={rowKey(row)}
                 onClick={() => onRowClick?.(row)}
-                className={`transition-colors ${
-                  onRowClick || rowHref ? 'cursor-pointer hover:bg-blue-50' : ''
-                }`}
+                className={cn(
+                  'transition-colors duration-100 ease-out',
+                  (onRowClick || rowHref) && 'cursor-pointer hover:bg-surface-hover',
+                )}
               >
                 {columns.map((col, i) => (
                   <td key={i}
-                      className={`px-4 py-3 ${resizeKey ? 'truncate' : ''} ${col.className ?? ''}`}
+                      className={cn('px-3 py-2 text-ink', resizeKey && 'truncate', col.className)}
                       title={resizeKey && typeof col.cell(row) === 'string'
                         ? String(col.cell(row)) : undefined}>
                     {i === 0 && rowHref ? (
@@ -194,7 +207,7 @@ export function DataTable<T>({
                       <Link
                         href={rowHref(row)}
                         onClick={e => e.stopPropagation()}
-                        className="text-blue-700 hover:underline"
+                        className="text-ink hover:text-accent hover:underline decoration-accent/40 underline-offset-2"
                       >
                         {col.cell(row)}
                       </Link>
@@ -208,7 +221,19 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
-      <Pagination page={page} pageSize={pageSize} total={sorted.length} onChange={setPage} />
+      <div className="flex items-center justify-between gap-2 px-1">
+        {resizeKey && cols.isCustomised ? (
+          <button
+            type="button"
+            onClick={cols.reset}
+            className="inline-flex items-center gap-1 text-xs text-ink-subtle hover:text-ink"
+          >
+            <Columns3 size={13} aria-hidden />
+            Reset column widths
+          </button>
+        ) : <span />}
+        <Pagination page={page} pageSize={pageSize} total={sorted.length} onChange={setPage} />
+      </div>
     </div>
   )
 }

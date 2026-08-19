@@ -1,20 +1,30 @@
 'use client'
 /**
- * GlobalHeader — Sprint 1E
+ * Application header: identity, scope selectors, account menu.
  *
- * Always-visible application header containing:
- *   [PPC OS]  [Account ▼]  [Profile ▼]  ────────  [email | Sign out]
+ * The scope selectors are the most consequential control in the app. Picking the
+ * wrong marketplace makes every screen look empty, and this project has already
+ * shipped a bug where "No rules yet" actually meant "wrong marketplace". So they
+ * are readable body-sized controls with visible labels, not 12px gray-on-dark.
  *
- * Replaces Nav. Consumes both AuthContext and AccountProfileContext.
- * Every future module sees the current account/profile at all times.
+ * The bar itself is light now. A dark header over a light sidebar over a light
+ * canvas is three surfaces pretending to be one app; the shell reads as a single
+ * plane with a hairline separating chrome from content. It also removes the
+ * washed-out gray-on-near-black label text the old header had.
  */
+import { usePathname } from 'next/navigation'
+import { ChevronRight, LogOut } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useAccountProfile } from '@/context/AccountProfileContext'
-import { usePathname } from 'next/navigation'
+import { Select } from '@/components/ui/Field'
+import { Button } from '@/components/ui/Button'
 
-/** Format a profile for the dropdown label */
-function profileLabel(p: { country_code: string | null; currency_code: string | null; marketplace_code: string }): string {
-  if (p.country_code && p.currency_code) return `${p.country_code} – ${p.currency_code}`
+function profileLabel(p: {
+  country_code: string | null
+  currency_code: string | null
+  marketplace_code: string
+}): string {
+  if (p.country_code && p.currency_code) return `${p.country_code} · ${p.currency_code}`
   if (p.country_code) return p.country_code
   return p.marketplace_code
 }
@@ -22,103 +32,78 @@ function profileLabel(p: { country_code: string | null; currency_code: string | 
 export function GlobalHeader() {
   const { user, logout } = useAuth()
   const {
-    accounts,
-    currentAccountId,
-    profiles,
-    currentProfileId,
-    accountsLoading,
-    profilesLoading,
-    setCurrentAccount,
-    setCurrentProfile,
+    accounts, currentAccountId, profiles, currentProfileId,
+    accountsLoading, profilesLoading, setCurrentAccount, setCurrentProfile,
   } = useAccountProfile()
   const pathname = usePathname()
-
-  // Don't render the selectors on the login page
   const isLoginPage = pathname === '/login'
 
   return (
-    <header className="bg-gray-900 text-white sticky top-0 z-50 shadow-md">
-      <div className="max-w-7xl mx-auto px-4 flex items-center gap-3 h-14">
-        {/* App identity */}
-        <span className="font-bold text-sm tracking-wide text-blue-400 shrink-0 mr-2">
-          PPC OS
+    <header className="sticky top-0 z-sticky border-b border-hairline bg-surface">
+      {/* No max-width here on purpose: the old header centred its contents in a
+          7xl container while the sidebar sat flush left, so the wordmark never
+          lined up with the navigation beneath it. */}
+      <div className="flex h-14 items-center gap-3 px-4">
+        <span className="mr-1 shrink-0 text-sm font-semibold tracking-tight text-ink">
+          PPC&nbsp;OS
         </span>
 
-        {/* Account + Profile selectors — hidden on login page */}
         {user && !isLoginPage && (
-          <>
-            {/* Account selector */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="text-gray-500 text-xs hidden sm:inline">Account</span>
-              <select
+          <div className="flex min-w-0 items-center gap-2">
+            <label className="flex min-w-0 items-center gap-1.5">
+              <span className="hidden shrink-0 text-xs text-ink-subtle sm:inline">Account</span>
+              <Select
                 value={currentAccountId ?? ''}
                 onChange={e => setCurrentAccount(e.target.value)}
                 disabled={accountsLoading || accounts.length === 0}
-                className="bg-gray-800 text-white text-sm rounded px-2 py-1 border border-gray-700
-                           focus:outline-none focus:border-blue-500 disabled:opacity-50
-                           max-w-[180px] truncate"
-                aria-label="Select account"
+                className="max-w-[200px]"
+                aria-label="Account"
               >
-                {accountsLoading && (
-                  <option value="">Loading…</option>
-                )}
+                {accountsLoading && <option value="">Loading…</option>}
                 {!accountsLoading && accounts.length === 0 && (
                   <option value="">No accounts</option>
                 )}
                 {accounts.map(a => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </label>
 
-            {/* Divider */}
-            <span className="text-gray-600 hidden sm:inline">›</span>
+            <ChevronRight size={14} className="shrink-0 text-ink-faint" aria-hidden />
 
-            {/* Profile selector */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="text-gray-500 text-xs hidden sm:inline">Marketplace</span>
-              <select
+            <label className="flex min-w-0 items-center gap-1.5">
+              <span className="hidden shrink-0 text-xs text-ink-subtle sm:inline">Marketplace</span>
+              <Select
                 value={currentProfileId ?? ''}
                 onChange={e => setCurrentProfile(e.target.value || null)}
                 disabled={profilesLoading || !currentAccountId}
-                className="bg-gray-800 text-white text-sm rounded px-2 py-1 border border-gray-700
-                           focus:outline-none focus:border-blue-500 disabled:opacity-50
-                           max-w-[160px] truncate"
-                aria-label="Select marketplace"
+                className="max-w-[170px]"
+                aria-label="Marketplace"
               >
-                <option value="">All Profiles</option>
+                <option value="">All marketplaces</option>
                 {profilesLoading && <option value="" disabled>Loading…</option>}
                 {!profilesLoading && profiles.map(p => (
                   <option key={p.id} value={p.id}>{profileLabel(p)}</option>
                 ))}
-              </select>
-            </div>
-          </>
+              </Select>
+            </label>
+          </div>
         )}
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* User menu */}
         {user && (
-          <div className="flex items-center gap-3 shrink-0">
-            <span className="text-gray-400 text-sm hidden md:inline truncate max-w-[180px]">
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="hidden max-w-[200px] truncate text-xs text-ink-muted md:inline">
               {user.email}
             </span>
-            <button
-              onClick={logout}
-              className="text-gray-400 hover:text-white text-sm transition-colors"
-            >
+            <Button variant="ghost" size="sm" onClick={logout}>
+              <LogOut aria-hidden />
               Sign out
-            </button>
+            </Button>
           </div>
         )}
       </div>
-
-      {/* Active context indicator bar — subtle coloured bottom border when selection is active */}
-      {user && !isLoginPage && currentAccountId && (
-        <div className="h-0.5 bg-blue-600 opacity-60" />
-      )}
     </header>
   )
 }

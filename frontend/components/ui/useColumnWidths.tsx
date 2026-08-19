@@ -32,7 +32,22 @@ export function useColumnWidths(storageKey: string, columnCount: number) {
       const saved = JSON.parse(raw)
       // Column sets change as features are added; a stale array would map
       // widths onto the wrong columns, so it is discarded rather than patched.
-      if (Array.isArray(saved) && saved.length === columnCount) setWidths(saved)
+      if (!Array.isArray(saved) || saved.length !== columnCount) return
+
+      // Widths that no longer fit are discarded, not honoured.
+      //
+      // Saved widths outlive the window they were set in. Drag a column wide on
+      // a large monitor, reopen on a laptop, and a `table-layout: fixed` colgroup
+      // will hold that width and push every other column off-screen — a table
+      // showing one column and no visible way back. Observed with a 667px first
+      // column against a ~1100px container.
+      const available = theadRef.current?.closest('table')?.parentElement?.clientWidth
+      const total = saved.reduce((a: number, b: number) => a + b, 0)
+      if (available && total > available * 1.25) {
+        localStorage.removeItem(`colw:${storageKey}`)
+        return
+      }
+      setWidths(saved)
     } catch {
       /* corrupt or unavailable storage must never break the table */
     }
@@ -69,7 +84,11 @@ export function useColumnWidths(storageKey: string, columnCount: number) {
       const d = drag.current
       if (!d) return
       const next = [...(base as number[])]
-      next[d.index] = Math.max(MIN_WIDTH, d.startWidth + (ev.clientX - d.startX))
+      // Cap a single column at 70% of the visible table, so no drag can leave
+      // the other columns with nowhere to go.
+      const container = theadRef.current?.closest('table')?.parentElement?.clientWidth
+      const max = container ? Math.round(container * 0.7) : Number.MAX_SAFE_INTEGER
+      next[d.index] = Math.min(max, Math.max(MIN_WIDTH, d.startWidth + (ev.clientX - d.startX)))
       setWidths(next)
     }
     const up = () => {
