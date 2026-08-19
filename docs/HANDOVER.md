@@ -541,6 +541,34 @@ rate limits, all of which only appear at scale. Enable a bid window on a real
 campaign with a small keyword count first.
 
 ---
+### 2026-08-19 (later): "do I have to paint the green cells?"
+
+The team asked whether marking the enabled hours was necessary, reasoning that
+unpainted hours would default to enabled. They were right that it felt
+redundant and wrong about what it did — the answer was that green was
+**mandatory**, and forgetting it paused the campaign at midnight and never
+re-enabled it. Ads off 24/7, forever, with nothing reporting it.
+
+"Unpainted means enabled" is not the fix either: activating a schedule would
+switch on campaigns a human paused for stock or budget reasons.
+
+Migration 024 makes the schedule restore **only what it changed**, the same
+shape as `dayparting_bid_state`. Verified live against Amazon:
+
+| Scenario | In the window | Outside the window |
+|---|---|---|
+| Campaign left ENABLED, only pause hours marked | `PAUSED` | **`ENABLED` again, by itself** |
+| Campaign PAUSED by a human | `PAUSED`, 0 writes | `PAUSED`, 0 writes, **0 state rows** |
+
+The second row is the safety property: no state row means the app never changed
+it, so there is nothing to undo and nothing gets switched on.
+
+Helium 10's action list — Pause Campaign, Decrease Bid, Increase Bid, with no
+"Enable" — implies they work the same way. That is inference from the team's
+screenshot, not from their documentation.
+
+---
+
 ### Still unproven, and why
 
 - Only **keyword-bid** writes had ever reached Amazon. **Campaign state and

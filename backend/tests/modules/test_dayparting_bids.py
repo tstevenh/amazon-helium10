@@ -280,12 +280,17 @@ def test_no_window_active_still_runs_the_bid_pass():
     An early return on `desired is None` — which is what the code used to do —
     would mean bids were never restored to baseline."""
     src = inspect.getsource(DaypartingService.reconcile_schedule)
-    none_branch = src.index("if desired is None:")
+    # Both passes must be reached unconditionally once scope is resolved.
+    states_call = src.index("_reconcile_states")
     bid_call = src.index("_reconcile_bids")
-    assert none_branch < bid_call
-    assert "return result" not in src[none_branch:none_branch + 300], (
-        "the no-window branch must record and fall through, not return"
+    assert states_call < bid_call
+    between = src[states_call:bid_call]
+    assert "return result" not in between, (
+        "nothing may return between the state pass and the bid pass"
     )
+    # And the None case must be handled inside the state pass, not skipped.
+    states_src = inspect.getsource(DaypartingService._reconcile_states)
+    assert "desired is not None" in states_src
 
 
 def test_only_enabled_campaigns_and_targets_are_touched():
@@ -340,3 +345,77 @@ def test_release_notification_is_not_labelled_a_failure():
 def test_a_notification_failure_cannot_undo_confirmed_bid_changes():
     src = inspect.getsource(DaypartingService._notify_released)
     assert "except Exception" in src
+
+
+# ── Campaign state: restore only what the app itself changed ────────────────
+# Unpainted hours used to mean "leave it alone", so a schedule with only a pause
+# window switched the ads off at midnight and never switched them back on —
+# silently, every day. The team asked why the green "enable" cells were needed;
+# the honest answer was that forgetting them was catastrophic and unreported.
+
+def _states_src():
+    return inspect.getsource(DaypartingService._reconcile_states)
+
+
+def test_no_window_means_restore_not_leave_alone():
+    src = _states_src()
+    assert "state.baseline_status" in src, (
+        "with no window active the app must put back what it changed"
+    )
+
+
+def test_a_campaign_the_schedule_never_touched_is_left_alone():
+    """The reason this is not simply "unpainted means enabled": a campaign a
+    human paused (out of stock, budget freeze) must never be switched on. No
+    state row means no write."""
+    src = _states_src()
+    idx = src.index("else:\n                continue   # never touched")
+    assert idx > 0, "the no-state-row branch must continue, not default to a write"
+
+
+def test_restore_requires_the_app_to_have_actually_written():
+    """baseline_status alone is not enough — a row whose write failed has
+    last_written_status NULL and must not trigger a restore."""
+    src = _states_src()
+    assert "state.last_written_status is not None" in src
+
+
+def test_a_rejected_state_write_does_not_record_last_written_status():
+    """Same trap as the bid path: recording a write Amazon refused would
+    manufacture drift and release a campaign nobody touched."""
+    src = _states_src()
+    not_ok = src.index('if not outcome.get("ok")')
+    assign = src.index("state.last_written_status = target")
+    assert not_ok < assign
+    assert "continue" in src[not_ok:assign]
+
+
+def test_state_drift_is_measured_against_our_own_last_write():
+    src = _states_src()
+    assert "current != state.last_written_status" in src
+
+
+def test_a_released_campaign_is_never_written_again():
+    src = _states_src()
+    released = src.index("state.released_at is not None")
+    write = src.index("update_campaign_state(")
+    assert released < write
+
+
+def test_archived_campaigns_are_never_touched():
+    """Amazon cannot un-archive, so a restore to 'enabled' would fail forever."""
+    src = _states_src()
+    assert 'current == "archived"' in src
+    assert "baseline_status IN ('enabled', 'paused')" not in src  # that lives in the migration
+
+
+def test_baseline_only_ever_records_a_restorable_status():
+    src = _states_src()
+    assert 'current in ("enabled", "paused")' in src, (
+        "an unexpected status must not be stored as a restore target"
+    )
+
+
+def test_state_release_notification_says_campaign_not_keyword():
+    src = _states_src()
+    assert 'noun="campaign"' in src

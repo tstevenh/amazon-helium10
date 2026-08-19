@@ -106,6 +106,35 @@ class DaypartingBidState(Base):
     updated_at       = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
 
+class DaypartingCampaignState(Base):
+    """The status a campaign had before this schedule paused it.
+
+    Unpainted hours used to mean "leave it alone", so a schedule with only a
+    pause window switched the ads off at midnight and never switched them back
+    on — silently, forever. Making unpainted mean "enabled" would be worse: it
+    would switch on campaigns a human paused deliberately.
+
+    So the app restores only what IT changed. A campaign a human paused never
+    gets a row here, so it can never be force-enabled; a campaign this schedule
+    paused has its previous status recorded and returned when no window applies.
+
+    last_written_status detects a human editing the campaign underneath us: if
+    Amazon's status is not what the app last wrote, the row is RELEASED rather
+    than overwritten. Same reasoning as [[DaypartingBidState]] above.
+    """
+    __tablename__ = "dayparting_campaign_state"
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    schedule_id         = Column(UUID(as_uuid=True), ForeignKey("dayparting_schedules.id", ondelete="CASCADE"), nullable=False)
+    campaign_id         = Column(UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    baseline_status     = Column(String(20), nullable=False)
+    last_written_status = Column(String(20), nullable=True)
+    released_at         = Column(TIMESTAMP(timezone=True), nullable=True)
+    released_reason     = Column(Text, nullable=True)
+    created_at          = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at          = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
 class DaypartingRun(Base):
     """One reconciliation decision, so "why are my ads off?" is answerable.
 

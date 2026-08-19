@@ -170,8 +170,18 @@ human approving each occurrence, so its design is deliberate:
   an event at the window's edges. The executor asks "what should this be right
   now?" hourly and corrects drift. Edge triggers would be simpler and wrong —
   this host sleeps, and a missed 6pm "enable" would leave ads off indefinitely.
-- Outside every window, campaigns are **left alone**, never force-enabled.
-  Otherwise activating a schedule would switch on campaigns a human paused.
+- Outside its windows a schedule **restores what it changed**, and nothing else.
+  It is not "left alone" and it is not "force-enabled" — both were wrong.
+  Leaving it alone meant a schedule with only a pause window switched the ads
+  off at midnight and never switched them back on, silently, forever; the
+  operator had to remember a matching enable window and forgetting cost a day
+  of sales. Force-enabling would switch on campaigns a human paused for stock
+  or budget reasons. `dayparting_campaign_state` records the status the campaign
+  had before this schedule first changed it, so a campaign the schedule never
+  touched has no row and is never written. `enable` windows still exist for
+  "be on at this hour regardless", but are no longer required.
+  Proven live 2026-08-19: pause-only schedule → PAUSED in window, ENABLED again
+  outside; a human-paused campaign stayed PAUSED with zero writes and zero rows.
 - Overlapping windows resolve to `pause`. Overlap is a config error and "off"
   is the cheaper reading.
 - Amazon exposes **no hourly performance data** for Sponsored Products

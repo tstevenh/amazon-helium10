@@ -267,8 +267,10 @@ export default function DaypartingPage() {
       )}
 
       <p className="text-xs text-gray-400">
-        Hours are local to the marketplace. Outside every window a campaign is
-        left alone — a schedule never switches on something you paused yourself.
+        Hours are local to the marketplace. Outside its windows a schedule puts
+        back what it changed — so you only need to mark the hours you want
+        paused. It never switches on a campaign you paused yourself, because it
+        only ever undoes its own changes.
       </p>
 
       {editing && (
@@ -402,7 +404,7 @@ function ScheduleGridPreview({ schedule }: { schedule: DaypartingSchedule }) {
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" /> enabled</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-400 inline-block" /> bid down</span>
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block" /> bid up</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-gray-100 inline-block" /> left alone</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-gray-100 inline-block" /> normal (restored)</span>
         </div>
       </div>
     </div>
@@ -683,9 +685,13 @@ function ScheduleEditor({
               </div>
             </div>
             <p className="text-xs text-gray-400 mt-1.5">
-              An hour marked at <span className="font-medium">12am–6am</span> means ads
-              are off from midnight and back on at 6am exactly. Unpainted hours are
-              left untouched.
+              Mark <span className="font-medium">12am–6am</span> as paused and ads are
+              off from midnight and back on at 6am exactly — you do{' '}
+              <span className="font-medium">not</span> need to mark the rest of the day
+              as enabled. Outside its windows the schedule restores whatever it
+              changed. &ldquo;Enable campaign&rdquo; is there for the rare case where you
+              want a campaign switched on at a set hour regardless of how it was
+              left.
             </p>
           </div>
 

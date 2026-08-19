@@ -58,6 +58,7 @@ from app.modules.accounts.service import AccountService
 from app.modules.campaigns.models import AdGroup, Campaign, Target
 from app.modules.dayparting.models import (
     DaypartingBidState,
+    DaypartingCampaignState,
     DaypartingEntry,
     DaypartingRun,
     DaypartingSchedule,
@@ -81,6 +82,7 @@ OUTCOME_NO_TIMEZONE = "skipped_no_timezone"
 # it is?" is answerable from dayparting_runs alone.
 OUTCOME_BID_RELEASED = "bid_released_manual_edit"
 OUTCOME_BID_CAPPED = "bid_writes_capped"
+OUTCOME_STATE_RELEASED = "state_released_manual_edit"
 
 
 BID_ACTIONS = ("decrease_bid", "increase_bid")
@@ -302,78 +304,12 @@ class DaypartingService:
                 token_box[0] = AccountService(self.db).get_valid_access_token(account)
             return token_box[0]
 
-        if desired is None:
-            self._record(schedule.id, None, local_str, None, None,
-                         OUTCOME_ALREADY_CORRECT,
-                         "no pause/enable window active at this hour")
+        self._reconcile_states(
+            schedule=schedule, profile=profile, campaigns=campaigns,
+            desired=desired, local_str=local_str, get_token=get_token,
+            result=result,
+        )
 
-        for campaign in (campaigns if desired is not None else []):
-            result["checked"] += 1
-            current = (campaign.status or "").lower()
-
-            if current == desired:
-                self._record(schedule.id, campaign.id, local_str, desired, current,
-                             OUTCOME_ALREADY_CORRECT)
-                continue
-
-            # An archived campaign cannot be re-enabled; never try.
-            if current == "archived":
-                self._record(schedule.id, campaign.id, local_str, desired, current,
-                             OUTCOME_FAILED, "campaign is archived on Amazon")
-                result["failed"] += 1
-                continue
-
-            if not settings.amazon_write_enabled:
-                self._record(schedule.id, campaign.id, local_str, desired, current,
-                             OUTCOME_WRITES_DISABLED,
-                             "AMAZON_WRITE_ENABLED is false, so no change was sent")
-                result["skipped"] += 1
-                continue
-
-            try:
-                outcome = update_campaign_state(
-                    get_token(), profile.amazon_profile_id,
-                    campaign.amazon_campaign_id, desired.upper(),
-                )
-            except (AmazonWriteDisabled, CampaignStateRefused) as exc:
-                self._record(schedule.id, campaign.id, local_str, desired, current,
-                             OUTCOME_WRITES_DISABLED, str(exc))
-                result["skipped"] += 1
-                continue
-            except Exception as exc:
-                logger.error("[dayparting] %s: %s", campaign.name, exc)
-                self._record(schedule.id, campaign.id, local_str, desired, current,
-                             OUTCOME_FAILED, str(exc)[:500])
-                result["failed"] += 1
-                continue
-
-            if not outcome.get("ok"):
-                # 200/207 with a per-item error is a failure, not a success.
-                self._record(schedule.id, campaign.id, local_str, desired, current,
-                             OUTCOME_FAILED, str(outcome.get("response"))[:500])
-                result["failed"] += 1
-                continue
-
-            # Only now did Amazon actually change: mirror it locally and log it
-            # alongside every other confirmed change to the account.
-            campaign.status = desired
-            self.execution_repo.record_change(
-                profile_id=profile.id,
-                entity_type="campaign",
-                entity_id=campaign.id,
-                amazon_entity_id=campaign.amazon_campaign_id,
-                field_changed="state",
-                old_value=current,
-                new_value=desired,
-                suggestion_id=None,
-                # The human who activated the schedule owns every change it
-                # makes — that is exactly what the approval exception means.
-                changed_by=schedule.activated_by,
-                source="dayparting",
-            )
-            self._record(schedule.id, campaign.id, local_str, desired, current,
-                         OUTCOME_APPLIED)
-            result["changed"] += 1
 
         # ── Bid pass ───────────────────────────────────────────────────────
         # Skipped entirely while the schedule wants these campaigns paused:
@@ -389,6 +325,159 @@ class DaypartingService:
 
         return result
 
+
+    # ── Campaign state reconciliation ──────────────────────────────────────
+    def _reconcile_states(
+        self,
+        schedule: DaypartingSchedule,
+        profile,
+        campaigns: list[Campaign],
+        desired: Optional[str],
+        local_str: str,
+        get_token,
+        result: dict[str, Any],
+    ) -> None:
+        """Bring every in-scope campaign to the state this hour calls for.
+
+        `desired` None means no pause/enable window is active. That does NOT
+        mean "leave everything alone": it means UNDO WHAT THIS SCHEDULE DID.
+
+        The distinction is the whole point. Leaving it alone meant a schedule
+        with only a pause window switched the ads off at midnight and never
+        switched them back on — silently, every day, forever. Making the
+        unpainted hours mean "enabled" instead would switch on campaigns a
+        human paused deliberately, which is worse.
+
+        So the app restores only its own changes. A campaign this schedule never
+        touched has no state row, and therefore nothing to restore.
+        """
+        states = {
+            st.campaign_id: st
+            for st in self.db.query(DaypartingCampaignState).filter(
+                DaypartingCampaignState.schedule_id == schedule.id
+            ).all()
+        }
+
+        for campaign in campaigns:
+            result["checked"] += 1
+            current = (campaign.status or "").lower()
+            state = states.get(campaign.id)
+
+            # An archived campaign cannot be re-enabled; never try.
+            if current == "archived":
+                if desired is not None:
+                    self._record(schedule.id, campaign.id, local_str, desired,
+                                 current, OUTCOME_FAILED,
+                                 "campaign is archived on Amazon")
+                    result["failed"] += 1
+                continue
+
+            # Drift: somebody changed the campaign outside this app. Compared
+            # against what the app last wrote, so it cannot fire on our own
+            # changes, and only as fresh as the last sync.
+            if (state is not None and state.released_at is None
+                    and state.last_written_status is not None
+                    and current != state.last_written_status):
+                state.released_at = datetime.now(tz.utc)
+                state.released_reason = (
+                    f"campaign is {current} but this schedule last set "
+                    f"{state.last_written_status} — changed outside the app, so "
+                    f"the schedule stopped managing it"
+                )
+                self._record(schedule.id, campaign.id, local_str, desired,
+                             current, OUTCOME_STATE_RELEASED, state.released_reason)
+                self._notify_released(
+                    schedule,
+                    [f"campaign '{campaign.name}': "
+                     f"{state.last_written_status} -> {current}"],
+                    noun="campaign",
+                )
+                continue
+
+            if state is not None and state.released_at is not None:
+                continue   # a human owns this campaign now
+
+            if desired is not None:
+                target = desired
+            elif state is not None and state.last_written_status is not None:
+                # No window applies: put back what was there before we changed
+                # it. Only reachable for campaigns this schedule actually wrote.
+                target = state.baseline_status
+            else:
+                continue   # never touched by this schedule — leave it alone
+
+            if current == target:
+                self._record(schedule.id, campaign.id, local_str, target, current,
+                             OUTCOME_ALREADY_CORRECT)
+                continue
+
+            if not settings.amazon_write_enabled:
+                self._record(schedule.id, campaign.id, local_str, target, current,
+                             OUTCOME_WRITES_DISABLED,
+                             "AMAZON_WRITE_ENABLED is false, so no change was sent")
+                result["skipped"] += 1
+                continue
+
+            try:
+                outcome = update_campaign_state(
+                    get_token(), profile.amazon_profile_id,
+                    campaign.amazon_campaign_id, target.upper(),
+                )
+            except (AmazonWriteDisabled, CampaignStateRefused) as exc:
+                self._record(schedule.id, campaign.id, local_str, target, current,
+                             OUTCOME_WRITES_DISABLED, str(exc))
+                result["skipped"] += 1
+                continue
+            except Exception as exc:
+                logger.error("[dayparting] %s: %s", campaign.name, exc)
+                self._record(schedule.id, campaign.id, local_str, target, current,
+                             OUTCOME_FAILED, str(exc)[:500])
+                result["failed"] += 1
+                continue
+
+            if not outcome.get("ok"):
+                # 200/207 with a per-item error is a failure, not a success.
+                # last_written_status is deliberately NOT updated here: recording
+                # a write Amazon rejected would make the next run see phantom
+                # drift and release a campaign nobody touched.
+                self._record(schedule.id, campaign.id, local_str, target, current,
+                             OUTCOME_FAILED, str(outcome.get("response"))[:500])
+                result["failed"] += 1
+                continue
+
+            # Only now did Amazon actually change.
+            if state is None:
+                # First change this schedule has made. `current` is the status a
+                # human left it in, so that is what we owe them back.
+                state = DaypartingCampaignState(
+                    schedule_id=schedule.id, campaign_id=campaign.id,
+                    baseline_status=current if current in ("enabled", "paused") else "enabled",
+                )
+                self.db.add(state)
+                states[campaign.id] = state
+            state.last_written_status = target
+            state.updated_at = datetime.now(tz.utc)
+
+            campaign.status = target
+            self.execution_repo.record_change(
+                profile_id=profile.id,
+                entity_type="campaign",
+                entity_id=campaign.id,
+                amazon_entity_id=campaign.amazon_campaign_id,
+                field_changed="state",
+                old_value=current,
+                new_value=target,
+                suggestion_id=None,
+                # The human who activated the schedule owns every change it
+                # makes — that is exactly what the approval exception means.
+                changed_by=schedule.activated_by,
+                source="dayparting",
+            )
+            self._record(schedule.id, campaign.id, local_str, target, current,
+                         OUTCOME_APPLIED,
+                         None if desired is not None
+                         else f"restored to {target} — no window active at this hour")
+            result["changed"] += 1
 
     # ── Bid reconciliation ─────────────────────────────────────────────────
     def _reconcile_bids(
@@ -576,8 +665,11 @@ class DaypartingService:
         if released:
             self._notify_released(schedule, released)
 
-    def _notify_released(self, schedule: DaypartingSchedule, released: list[str]) -> None:
-        """Tell a human that the schedule let go of some keywords.
+    def _notify_released(
+        self, schedule: DaypartingSchedule, released: list[str],
+        noun: str = "keyword",
+    ) -> None:
+        """Tell a human that the schedule let go of something it was managing.
 
         Releasing is the app deferring to a person, not a failure, so it gets
         its own event type — labelling it 'dayparting_failed' would train the
@@ -592,12 +684,12 @@ class DaypartingService:
         try:
             NotificationService(self.db).notify(
                 "dayparting_released",
-                subject=(f"Dayparting released {len(released)} keyword(s) in "
-                         f"'{schedule.name}' after a manual bid change"),
-                body=(body + "\n\nThese keywords were changed outside the app, so "
-                      "the schedule stopped managing their bids. Nothing was "
-                      "overwritten. Remove and re-add them to the schedule to "
-                      "hand control back."),
+                subject=(f"Dayparting released {len(released)} {noun}(s) in "
+                         f"'{schedule.name}' after a manual change"),
+                body=(body + f"\n\nThese {noun}s were changed outside the app, so "
+                      f"the schedule stopped managing them. Nothing was "
+                      f"overwritten. Remove and re-add them to the schedule to "
+                      f"hand control back."),
             )
         except Exception as exc:
             # A notification failure must not roll back confirmed bid changes.
